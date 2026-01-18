@@ -1,5 +1,6 @@
 ![GroqShell](https://img.shields.io/badge/GroqShell-00aa55?style=for-the-badge)
 ![CLI](https://img.shields.io/badge/CLI-green?style=for-the-badge&logo=gnu-bash&logoColor=white)
+![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 # GroqShell
 
