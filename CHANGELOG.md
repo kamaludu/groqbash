@@ -10,4 +10,8 @@
 - Prima versione pubblica con gestione whitelist via API Groq
 
 ## [0.12.0] - 2026-01-19
-- Prima release pubblica
+### Added
+- Script principale `groqshell` con refresh modelli via API
+- Opzioni CLI: --refresh-models, --list-models, --dry-run, --debug
+- Salvataggio automatico output oltre soglia
+- Documentazione: README, INSTALL, CHANGELOG, CONTRIBUTING
