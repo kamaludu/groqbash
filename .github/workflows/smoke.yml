@@ -1,26 +1,33 @@
-name: Smoke tests
+#!/usr/bin/env bash
+set -euo pipefail
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+GROQSH="./bin/groqshell"
 
-jobs:
-  smoke:
-    runs-on: ubuntu-latest
+echo "Eseguo smoke test su: $GROQSH"
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# 1) --version
+if $GROQSH --version >/dev/null 2>&1; then
+  echo "1) Verifica --version"
+  echo "  OK: --version eseguito"
+else
+  echo "1) Verifica --version"
+  echo "  FAIL: --version fallito"
+  exit 1
+fi
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bash curl jq python3
+# 2) --dry-run
+echo
+echo "2) Verifica --dry-run (payload JSON)"
+out="$($GROQSH --dry-run "test payload" 2>&1)" || { echo "  FAIL: --dry-run ha fallito"; echo "$out"; exit 1; }
 
-      - name: Make groqshell executable
-        run: chmod +x bin/groqshell
+# Verifica che l'output sia JSON valido (usa jq se presente, altrimenti python)
+if command -v jq >/dev/null 2>&1; then
+  echo "$out" | jq . >/dev/null 2>&1 || { echo "  FAIL: output non è JSON valido"; echo "$out"; exit 1; }
+else
+  python3 - <<PY >/dev/null 2>&1 || { echo "  FAIL: output non è JSON valido (python fallback)"; echo "$out"; exit 1; }
+import sys, json
+json.load(sys.stdin)
+PY
+fi
 
-      - name: Run smoke tests
-        run: bash tests/smoke.sh
+echo "  OK: --dry-run ha stampato payload JSON valido"
