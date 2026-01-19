@@ -35,15 +35,21 @@ GroqShell fornisce un’interfaccia CLI semplice, sicura e robusta per chiamare 
 
 ---
 
-## Installazione rapida
+## Installazione
 
-```sh
-curl -O https://raw.githubusercontent.com/kamaludu/groqshell/main/bin/groqshell
-chmod +x groqshell
-export GROQ_API_KEY="gsk_XXXXXXXXXXXXX"
-```
+Per le istruzioni di installazione dettagliate, le dipendenze raccomandate e i comandi di verifica, vedi il file `INSTALL.md` nel repository.
 
-Aggiungi export GROQ_API_KEY="..." al tuo .bashrc o .profile per persistenza.
+---
+
+## Nota su file temporanei e percorso di output
+
+Lo script crea tutti i file temporanei sotto `$TMPDIR` (fallback: `~/.cache/groq_tmp`) e non usa la directory di sistema `/tmp` per i temporanei interni. Se passi `--out /percorso/file`, lo script tenterà di creare la directory di destinazione; se questa non è creabile o scrivibile (es. `/tmp` su alcuni ambienti), lo script stamperà l’output su terminale con un messaggio esplicito. Per compatibilità, preferisci percorsi sotto la tua home o `$TMPDIR`.
+
+---
+
+## Dipendenze e fallback
+
+Per dettagli completi sulle dipendenze e sul comportamento dei fallback (`jq` → preferito; `python3` → fallback sicuro; sed/grep → ultima risorsa), consulta `INSTALL.md`.
 
 ---
 
@@ -118,6 +124,18 @@ Esegui:
 - Scarica la lista ufficiale via API autenticata.  
 - Svuota e ricostruisce models.txt.  
 - Stampa diagnostica concisa; con --debug mostra dettagli aggiuntivi.
+
+---
+
+### Tabella codici di uscita
+
+| Codice | Significato                                                                 |
+|-------:|------------------------------------------------------------------------------|
+| **0**  | Successo: richiesta completata, output stampato o salvato.                  |
+| **1**  | Errore generico: argomenti non validi, file non leggibile, configurazione.  |
+| **2**  | Errore di rete / curl: DNS, timeout, connessione rifiutata.                 |
+| **3**  | Errore HTTP/API: l’endpoint ha risposto con codice 4xx/5xx.                 |
+| **4**  | Nessun contenuto testuale estratto dalla risposta (errore di parsing).      |
 
 ---
 
