@@ -7,7 +7,8 @@ Prerequisiti:
 
 Installazione:
 1. Scarica lo script:
-   curl -O https://raw.githubusercontent.com/<tuo-repo>/groqshell/bin/groqshell
+curl -O https://raw.githubusercontent.com/kamaludu/groqshell/main/bin/groqshell
+
 2. Rendi eseguibile:
    chmod +x bin/groqshell
 3. Esporta la API key:
