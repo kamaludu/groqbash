@@ -32,9 +32,11 @@ fi
 echo
 echo "2) Verifica --dry-run (payload JSON)"
 
-# Run --dry-run and capture stdout/stderr and exit code
+PROMPT_TEXT="test payload"
+
+# Run --dry-run providing the prompt via stdin (most compatible)
 set +e
-DRY_OUT="$("$GROQSH" --dry-run "test payload" 2>&1)"
+DRY_OUT="$(printf '%s' "$PROMPT_TEXT" | "$GROQSH" --dry-run 2>&1)"
 DRY_EXIT=$?
 set -e
 
