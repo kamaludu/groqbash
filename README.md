@@ -40,10 +40,10 @@ GroqShell fornisce un’interfaccia CLI semplice, sicura e robusta per chiamare 
 ```sh
 curl -O https://raw.githubusercontent.com/kamaludu/groqshell/main/bin/groqshell
 chmod +x groqshell
-export GROQAPIKEY="gsk_XXXXXXXXXXXXX"
+export GROQ_API_KEY="gsk_XXXXXXXXXXXXX"
 ```
 
-Aggiungi export GROQAPIKEY="..." al tuo .bashrc o .profile per persistenza.
+Aggiungi export GROQ_API_KEY="..." al tuo .bashrc o .profile per persistenza.
 
 ---
 
