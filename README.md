@@ -127,7 +127,7 @@ Esegui:
 
 ---
 
-### Tabella codici di uscita
+### Codici di uscita e significato
 
 | Codice | Significato                                                                 |
 |-------:|------------------------------------------------------------------------------|
