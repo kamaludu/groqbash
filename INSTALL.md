@@ -6,27 +6,33 @@ Questo file spiega come installare e verificare groqshell, le dipendenze raccoma
 ## Prerequisiti e dipendenze
 
 **Richiesti**
-- bash
-- curl
+- **bash**
+- **curl**
 
 **Raccomandati**
-- jq — per costruzione e parsing JSON robusti (se non presente lo script usa un fallback).
-- python3 — usato come fallback per serializzare/parsing JSON e per fsync; consigliato per maggiore affidabilità.
-- coreutils — mktemp, df, mv, chmod, awk (disponibili su Linux/macOS/Termux).
-- grep/sed/awk — utili per fallback best‑effort.
+- **jq** — per costruzione e parsing JSON robusti (se non presente lo script usa un fallback).
+- **python3** — usato come fallback per serializzare/parsing JSON e per fsync; consigliato per maggiore affidabilità.
+- **coreutils** — mktemp, df, mv, chmod, awk (disponibili su Linux/macOS/Termux).
+- **grep/sed/awk** — utili per fallback best‑effort.
 
 **Nota su locale e encoding**
 Lo script assume un ambiente UTF‑8. Se il sistema non ha un locale UTF‑8 disponibile, impostare una locale UTF‑8 prima di eseguire lo script, ad esempio:
+```sh
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
+```
 
 ## Installazione
 
 Scarica lo script
+```sh
 curl -O https://raw.githubusercontent.com/kamaludu/groqshell/main/bin/groqshell
+```
 
 Rendi eseguibile
+```sh
 chmod +x groqshell
+```
 
 Posiziona il binario nel tuo PATH (opzionale, consigliato)
 esempio utente Linux/macOS:
