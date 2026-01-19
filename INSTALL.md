@@ -35,19 +35,23 @@ chmod +x groqshell
 ```
 
 Posiziona il binario nel tuo PATH (opzionale, consigliato)
-esempio utente Linux/macOS:
+```sh
+# esempio utente Linux/macOS
 mkdir -p "$HOME/.local/bin"
 mv groqshell "$HOME/.local/bin/groqshell"
-assicurati che ~/.local/bin sia nel PATH:
+# assicurati che ~/.local/bin sia nel PATH
 export PATH="$HOME/.local/bin:$PATH"
+```
 
 Imposta la chiave API
+```sh
 export GROQ_API_KEY="gsk_XXXXXXXXXXXXX"
+```
 
 Verifica installazione
+```sh
 groqshell --version
-oppure (se non hai aggiunto al PATH)
-./groqshell --version
+```
 
 ## Comportamento dei file temporanei e percorso di output
 
