@@ -67,19 +67,29 @@ groqshell --version
 ## Uso base ed esempi
 
 Prompt semplice
+```sh
 groqshell "scrivi una funzione bash che..."
+```
 
 Input da pipe
+```sh
 echo "Spiegami questo codice" | groqshell
+```
 
 Input da file
+```sh
 groqshell -f input.txt
+```
 
 Forzare salvataggio su file
+```sh
 groqshell --save --out /percorso/di/uscita/output.txt "testo lungo..."
+```
 
 Dry run (mostra payload JSON senza inviare)
+```sh
 groqshell --dry-run "ciao"
+```
 
 ## Codici di uscita e significato
 
