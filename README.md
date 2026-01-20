@@ -158,6 +158,13 @@ GPLv3 — vedi LICENSE nel repository per i dettagli.
 
 ---
 
+### Note
+
+Parti del codice e della documentazione di GroqShell sono state sviluppate con il supporto di strumenti di intelligenza artificiale, utilizzati come assistenti alla scrittura e al refactoring.  
+La progettazione, l’architettura e le decisioni tecniche restano interamente curate a mano.
+
+---
+
 ### Contatti
 - Autore: Cristian Evangelisti  
 - Email: opensource​@​cevangel.​anonaddy.​me
