@@ -1,5 +1,11 @@
 # Contribuire a GroqShell
 
+> 🇮🇹 GroqShell è un progetto sviluppato nel mio tempo libero.  
+> Risponderò alle issue e alle richieste quando possibile, ma non posso garantire supporto continuo.
+> 
+> 🇬🇧 GroqShell is a personal free‑time project.  
+> I will respond to issues and requests when possible, but I cannot guarantee continuous support.
+
 Grazie per il tuo interesse verso GroqShell.  
 GroqShell è un progetto personale, sviluppato e mantenuto dal suo autore.  
 Al momento non sono previste pull request esterne, ma idee, segnalazioni e suggerimenti tramite issue sono sempre ben accetti.
