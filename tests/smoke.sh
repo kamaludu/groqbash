@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # tests/smoke.sh
-# Smoke tests minimi per GroqShell: --version e --dry-run (estrazione JSON robusta)
+# Smoke tests minimi per GroqBash: --version e --dry-run (estrazione JSON robusta)
 # Exit codes:
 #  0 = success
 #  1 = generic failure (test assertion)
 #  2 = environment/setup failure
 
-GROQSH="./bin/groqshell"
+GROQSH="./bin/groqbash"
 
 echo "Eseguo smoke test su: $GROQSH"
 echo
