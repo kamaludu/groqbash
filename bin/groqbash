@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# GroqShell — Bash Wrapper
+# GroqBash — Bash Wrapper
 # Copyright (C) 2026 Cristian Evangelisti
 # Contact: opensource@cevangel.anonaddy.me
 # Created with the support of AI-assisted tooling.
@@ -28,13 +28,13 @@
 #   in non-streaming mode by default. Designed for Bash and Termux-friendly.
 #
 # Quick setup:
-#   chmod +x ~/groqshell
+#   chmod +x ~/groqbash
 #   export GROQ_API_KEY="gsk_XXXXXXXXXXXXX"
 #
 # Basic usage:
-#   groqshell "write a bash function"
-#   echo "text" | groqshell
-#   groqshell -f input.txt
+#   groqbash "write a bash function"
+#   echo "text" | groqbash
+#   groqbash -f input.txt
 #
 # Main options:
 #   -m, --model <name>         Select model (e.g. llama3-70b-8192)
@@ -81,8 +81,8 @@
 #   - Never execute model output as shell commands
 #
 # Examples
-#   TMPDIR="$HOME/.cache/groq_tmp" ~/groqshell "say hi"
-#   echo "text" | ~/groqshell -m llama3-70b-8192
+#   TMPDIR="$HOME/.cache/groq_tmp" ~/groqbash "say hi"
+#   echo "text" | ~/groqbash -m llama3-70b-8192
 # --- END HELP ----------------------------------------------------------------
 
 set -euo pipefail
@@ -99,7 +99,7 @@ else
   export LANG=C
 fi
 
-SCRIPT_NAME="groqshell"
+SCRIPT_NAME="groqbash"
 SCRIPT_VERSION="0.11.1"
 SCRIPT_DATE="2026-01-18"
 
