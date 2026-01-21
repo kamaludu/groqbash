@@ -60,7 +60,7 @@ Lo script crea tutti i file temporanei sotto `$TMPDIR` (fallback: `~/.cache/groq
 
 ## Dipendenze e fallback
 
-Per dettagli completi sulle dipendenze e sul comportamento dei fallback (`jq` → preferito; `python3` → fallback sicuro; sed/grep → ultima risorsa), consulta `INSTALL.md`.
+Per dettagli completi sulle dipendenze e sul comportamento dei fallback (`jq` → preferito; `python3` → fallback sicuro; sed/grep → ultima risorsa), consulta [INSTALL](INSTALL.md).
 
 ---
 
