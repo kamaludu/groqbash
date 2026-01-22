@@ -20,6 +20,7 @@ Basic usage
   groqbash "write a bash function"
   echo "hello" | groqbash
   groqbash -f input.txt
+  groqbash --provider gemini "translate this"
 
 Main options
 ------------
@@ -35,6 +36,7 @@ Main options
   --auto-default-policy <p>  preferred | alpha (default: preferred)
 
   --provider <name>          Use external provider module (extras/providers)
+  --provider                 Interactive provider selection
   --install-extras           Install extras (docs, utils, providers)
 
   --save                     Force save to file
@@ -52,7 +54,10 @@ Security notes
 --------------
   • GroqBash never uses /tmp.
   • All temporary files are created under a secure directory.
+  • Temporary directories require mktemp -d; insecure fallbacks are refused.
   • Provider modules are loaded only from non-world-writable locations.
+  • GROQBASHEXTRASDIR must be an absolute, non-world-writable path.
+  • GROQBASHTMPDIR must be a non-world-writable path.
   • Never commit your API key.
   • Never execute model output as shell commands.
 
@@ -61,11 +66,12 @@ Requirements
   Required:
     - bash
     - curl
+    - mktemp (secure directory creation)
 
   Recommended:
     - jq (JSON parsing)
     - python3 (fsync)
-    - coreutils (mktemp, chmod, mv, etc.)
+    - coreutils (chmod, mv, etc.)
     - grep, sed, awk
 
 Compatibility
@@ -78,3 +84,4 @@ Examples
 --------
   TMPDIR="$HOME/.cache/groq_tmp" groqbash "say hi"
   echo "text" | groqbash -m llama3-70b-8192
+  groqbash --provider gemini "summarize this"
