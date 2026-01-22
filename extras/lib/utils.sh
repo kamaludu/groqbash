@@ -4,7 +4,7 @@
 # File: extras/lib/utils.sh
 # Copyright (C) 2026 Cristian Evangelisti
 # License: GPL-3.0-or-later
-# Source: https://github.com/<your-repo>/groqbash
+# Source: https://github.com/kamaludu/groqbash
 # =============================================================================
 # Optional utilities for groqbash (extras).
 # - This file is safe to source; it has no side effects on load.
