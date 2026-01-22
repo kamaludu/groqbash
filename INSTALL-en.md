@@ -1,6 +1,7 @@
 [![GroqBash](https://img.shields.io/badge/_GroqBash_-00aa55?style=for-the-badge&label=%E2%9E%9C&labelColor=004d00)](README.md)
 
-# INSTALLATION
+# INSTALLATION &nbsp; [![Italian](https://img.shields.io/badge/IT-Versione_italiana-00aa55?style=flat)](INSTALL.md) 
+
 
 This document explains how to install GroqBash, configure your environment, verify the installation, and understand how temporary files, output paths, and exit codes work.
 
