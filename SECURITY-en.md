@@ -196,5 +196,5 @@ Users must understand its assumptions and limitations before using it in sensiti
 See full documentation:
 
 - **[README](README-en.md)**  
-- **[INSTALL](INSTALL.md)**  
+- **[INSTALL](INSTALL-en.md)**  
 - **[CHANGELOG](CHANGELOG.md)**
