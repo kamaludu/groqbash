@@ -6,12 +6,13 @@
 # License: GPL-3.0-or-later
 # Source: https://github.com/kamaludu/groqbash
 # =============================================================================
-
+# Bash-only. Requires: bash, jq, curl, mktemp, stat or find.
+# Designed for POSIX-like environments (Linux, macOS, BSD, WSL, Termux) with required tools installed.
 set -euo pipefail
 
 SCRIPT_NAME="groqbash"
-SCRIPT_VERSION="0.12.3"
-SCRIPT_DATE="2026-01-22"
+SCRIPT_VERSION="1.0.0"
+SCRIPT_DATE="2026-01-23"
 
 # Error codes
 GROQBASH_ERR_NO_API_KEY=10
@@ -30,6 +31,14 @@ GROQBASHERRNO_PROMPT=$GROQBASH_ERR_NO_PROMPT
 GROQBASHERRTMP=$GROQBASH_ERR_TMP
 GROQBASHERRAPI=$GROQBASH_ERR_API
 
+# -------------------------
+# Mandatory dependency: jq
+# -------------------------
+if ! command -v jq >/dev/null 2>&1; then
+  printf 'Error: jq is required. Please install jq and retry.\n' >&2
+  exit $GROQBASHERRINVALID_JSON
+fi
+
 # Resolve script dir
 resolve_script_dir() {
   local src="$0" rl dir
@@ -42,87 +51,38 @@ resolve_script_dir() {
 }
 
 SCRIPTDIR="$(resolve_script_dir)"
-GROQBASH_DIR="$SCRIPTDIR/groqbash.d"
-GROQBASH_CONFIG_DIR="$GROQBASH_DIR/config"
-GROQBASH_MODELS_DIR="$GROQBASH_DIR/models"
-GROQBASH_TEMPLATES_DIR="$GROQBASH_DIR/templates"
-GROQBASH_HISTORY_DIR="$GROQBASH_DIR/history"
-GROQBASH_TMPDIR="$GROQBASH_DIR/tmp"
+GROQBASH_DIR="${GROQBASH_DIR:-$SCRIPTDIR/groqbash.d}"
+GROQBASH_CONFIG_DIR="${GROQBASH_CONFIG_DIR:-$GROQBASH_DIR/config}"
+GROQBASH_MODELS_DIR="${GROQBASH_MODELS_DIR:-$GROQBASH_DIR/models}"
+GROQBASH_TEMPLATES_DIR="${GROQBASH_TEMPLATES_DIR:-$GROQBASH_DIR/templates}"
+GROQBASH_HISTORY_DIR="${GROQBASH_HISTORY_DIR:-$GROQBASH_DIR/history}"
+GROQBASH_TMPDIR="${GROQBASH_TMPDIR:-$GROQBASH_DIR/tmp}"
 GROQBASH_EXTRAS_DIR="${GROQBASH_EXTRAS_DIR:-$GROQBASH_DIR/extras}"
 
-# Ensure runtime tree exists (no system dirs)
+# Ensure runtime tree exists
+umask 077
 mkdir -p "$GROQBASH_CONFIG_DIR" "$GROQBASH_MODELS_DIR" "$GROQBASH_TEMPLATES_DIR" "$GROQBASH_HISTORY_DIR" "$GROQBASH_TMPDIR" "$GROQBASH_EXTRAS_DIR/providers" 2>/dev/null || true
 chmod 700 "$GROQBASH_DIR" 2>/dev/null || true
 
 # -------------------------
-# Basic hardening checks for GROQBASH_TMPDIR and GROQBASH_EXTRAS_DIR
-# Conservative, POSIX-friendly checks: ensure variables are set, directories exist,
-# and are not world-writable. For extras dir, prefer absolute path.
+# Initialize globals (to satisfy set -u)
 # -------------------------
-# Helper: check world-writable using ls -ld permission string (position 9 == 'w')
-_is_world_writable() {
-  # usage: _is_world_writable "/path" && echo yes
-  local d="$1" perms others_write
-  [ -d "$d" ] || return 1
-  perms="$(ls -ld "$d" 2>/dev/null | awk '{print $1}' 2>/dev/null || true)"
-  [ -z "$perms" ] && return 1
-  others_write="$(printf '%s' "$perms" | awk '{print substr($0,9,1)}')"
-  [ "$others_write" = "w" ]
-}
-
-# Helper: get owner of path
-_get_owner() {
-  local d="$1"
-  ls -ld "$d" 2>/dev/null | awk '{print $3}' 2>/dev/null || printf ''
-}
-
-# Validate GROQBASH_TMPDIR
-if [ -z "${GROQBASH_TMPDIR:-}" ]; then
-  echo "Error: GROQBASH_TMPDIR is not set." >&2
-  exit $GROQBASHERRTMP
-fi
-# Ensure directory exists or can be created
-if [ ! -d "$GROQBASH_TMPDIR" ]; then
-  if ! mkdir -p "$GROQBASH_TMPDIR" 2>/dev/null; then
-    echo "Error: cannot create GROQBASH_TMPDIR: $GROQBASH_TMPDIR" >&2
-    exit $GROQBASHERRTMP
-  fi
-fi
-# Check world-writable
-if _is_world_writable "$GROQBASH_TMPDIR"; then
-  echo "Security error: GROQBASH_TMPDIR ($GROQBASH_TMPDIR) is world-writable; refusing to run." >&2
-  exit 1
-fi
-
-# Validate GROQBASH_EXTRAS_DIR
-if [ -z "${GROQBASH_EXTRAS_DIR:-}" ]; then
-  echo "Error: GROQBASH_EXTRAS_DIR is not set." >&2
-  exit 1
-fi
-# Prefer absolute path for extras dir
-case "$GROQBASH_EXTRAS_DIR" in
-  /*) : ;;
-  *)
-    echo "Security error: GROQBASH_EXTRAS_DIR must be an absolute path: $GROQBASH_EXTRAS_DIR" >&2
-    exit 1
-    ;;
-esac
-# Ensure directory exists (create if needed)
-if [ ! -d "$GROQBASH_EXTRAS_DIR" ]; then
-  if ! mkdir -p "$GROQBASH_EXTRAS_DIR" 2>/dev/null; then
-    echo "Error: cannot create GROQBASH_EXTRAS_DIR: $GROQBASH_EXTRAS_DIR" >&2
-    exit 1
-  fi
-fi
-# Check world-writable
-if _is_world_writable "$GROQBASH_EXTRAS_DIR"; then
-  echo "Security error: GROQBASH_EXTRAS_DIR ($GROQBASH_EXTRAS_DIR) is world-writable; refusing to run." >&2
-  exit 1
-fi
-
-# -------------------------
-# Defaults / env
-# -------------------------
+CONTENT=""
+RUN_TMPDIR=""
+PAYLOAD=""
+RESP=""
+ERRF=""
+JSON_INPUT=""
+ARGS=()
+FILE_INPUTS=()
+TEMPLATE=""
+BATCH_FILE=""
+CHAT_MODE=0
+SET_DEFAULT_MODEL=""
+REFRESH_MODELS=0
+LIST_MODELS=0
+FORCE_SAVE_MODE=""
+OUT_PATH=""
 GROQ_API_KEY="${GROQ_API_KEY:-}"
 SYSTEM_PROMPT="${SYSTEM_PROMPT:-}"
 TEMP="${TEMP:-1.0}"
@@ -132,56 +92,122 @@ AUTO_POLICY="${AUTO_POLICY:-preferred}"
 DEBUG=0
 QUIET=0
 DRY_RUN=0
-STREAM_MODE=""   # "", "true", "false"
-OUTPUT_MODE="text"  # json|pretty|text|raw
+STREAM_MODE=""
+OUTPUT_MODE="text"
 THRESHOLD="${THRESHOLD:-1000}"
 MAX_RETRIES="${MAX_RETRIES:-3}"
-
-# Provider infra
 SUPPORTED_PROVIDERS="groq gemini"
 PROVIDER="groq"
 PROVIDER_CLI=""
 PROVIDER_INTERACTIVE=0
-
-# New flag: install extras
 INSTALL_EXTRAS=0
+MODELS_FILE="$GROQBASH_MODELS_DIR/models.txt"
+ALLOWED_MODELS=""
 
-# Basic helpers
-dbg() { [ "${DEBUG:-0}" -eq 1 ] || return 0; printf '%s\n' "$*" >&2; }
-is_tty_out() { [ -t 1 ]; }
-# make_tmpdir: create a secure temporary directory using mktemp -d only
-make_tmpdir() {
-  local tmpd
-  # Prefer creating under GROQBASH_TMPDIR if possible
-  if [ -n "${GROQBASH_TMPDIR:-}" ] && [ -d "$GROQBASH_TMPDIR" ]; then
-    if tmpd="$(mktemp -d -p "$GROQBASH_TMPDIR" groq.XXXX 2>/dev/null || true)"; then
-      :
-    else
-      tmpd=""
-    fi
-  else
-    tmpd=""
+# Use array for curl base options to avoid word-splitting (SC2086 fix)
+CURL_BASE_OPTS=( --silent --show-error --no-buffer --max-time 120 )
+
+# -------------------------
+# Debug helper (masks API key)
+# -------------------------
+dbg() {
+  [ "${DEBUG:-0}" -eq 1 ] || return 0
+  local msg="$*"
+  if [ -n "${GROQ_API_KEY:-}" ]; then
+    msg="${msg//${GROQ_API_KEY}/****}"
   fi
-  # Fallback to system tmpdir via mktemp -d
+  printf '%s\n' "$msg" >&2
+}
+# Note: avoid running this script with `bash -x` when GROQ_API_KEY is set; tracing may reveal sensitive data.
+
+is_tty_out() { [ -t 1 ]; }
+
+# -------------------------
+# File metadata helpers: prefer stat, fallback to find -printf
+# -------------------------
+_get_perm_string() {
+  local path="$1" perm=""
+  if command -v stat >/dev/null 2>&1; then
+    perm="$(stat -c %A "$path" 2>/dev/null || true)"
+  elif command -v find >/dev/null 2>&1; then
+    perm="$(find "$path" -maxdepth 0 -printf '%M' 2>/dev/null || true)"
+  else
+    dbg "Warning: neither stat nor find available to get permissions for $path"
+    perm=""
+  fi
+  printf '%s' "$perm"
+}
+_get_owner() {
+  local path="$1" owner=""
+  if command -v stat >/dev/null 2>&1; then
+    owner="$(stat -c %U "$path" 2>/dev/null || true)"
+  elif command -v find >/dev/null 2>&1; then
+    owner="$(find "$path" -maxdepth 0 -printf '%u' 2>/dev/null || true)"
+  else
+    dbg "Warning: neither stat nor find available to get owner for $path"
+    owner=""
+  fi
+  printf '%s' "$owner"
+}
+_get_file_signature() {
+  local path="$1" sig=""
+  if command -v stat >/dev/null 2>&1; then
+    sig="$(stat -c '%A|%U|%G|%s|%Y' "$path" 2>/dev/null || true)"
+  elif command -v find >/dev/null 2>&1; then
+    sig="$(find "$path" -maxdepth 0 -printf '%M|%u|%g|%s|%T@' 2>/dev/null || true)"
+  else
+    dbg "Warning: neither stat nor find available to get signature for $path"
+    sig=""
+  fi
+  printf '%s' "$sig"
+}
+# Provide a wrapper with the name requested in patches (non-destructive)
+getfile_signature() {
+  _get_file_signature "$1"
+}
+_is_world_writable() {
+  local d="$1" perms others_write
+  [ -d "$d" ] || return 1
+  perms="$(_get_perm_string "$d")"
+  [ -z "$perms" ] && return 1
+  others_write="$(printf '%s' "$perms" | awk '{print substr($0,9,1)}')"
+  [ "$others_write" = "w" ]
+}
+
+# -------------------------
+# Secure tmpdir creation
+# -------------------------
+make_tmpdir() {
+  local tmpd=""
+  umask 077
+  if [ -n "${GROQBASH_TMPDIR:-}" ] && [ -d "$GROQBASH_TMPDIR" ]; then
+    tmpd="$(mktemp -d -p "$GROQBASH_TMPDIR" groq.XXXX 2>/dev/null || true)"
+  fi
   if [ -z "$tmpd" ]; then
     tmpd="$(mktemp -d 2>/dev/null || true)"
   fi
   if [ -z "$tmpd" ] || [ ! -d "$tmpd" ]; then
-    echo "Error: unable to create secure temporary directory (mktemp failed)." >&2
-    exit $GROQBASHERRTMP
+    printf 'Error: unable to create secure temporary directory (mktemp failed).\n' >&2
+    exit "$GROQBASHERRTMP"
   fi
-  # Ensure restrictive permissions
   chmod 700 "$tmpd" 2>/dev/null || true
   printf '%s' "$tmpd"
 }
 
-file_readable() { [ -r "$1" ] && [ -f "$1" ]; }
+ensure_run_tmpdir() {
+  if [ -n "${RUN_TMPDIR:-}" ] && [ -d "${RUN_TMPDIR:-}" ]; then return 0; fi
+  RUN_TMPDIR="$(make_tmpdir)" || { printf 'Error: cannot create RUN_TMPDIR in %s\n' "$GROQBASH_TMPDIR" >&2; exit "$GROQBASHERRTMP"; }
+  PAYLOAD="$RUN_TMPDIR/payload.json"
+  RESP="$RUN_TMPDIR/resp.json"
+  ERRF="$RUN_TMPDIR/err.log"
+  trap 'rm -rf "$RUN_TMPDIR"' EXIT INT TERM
+  dbg "Created RUN_TMPDIR: $RUN_TMPDIR"
+}
 
-# Compact utilities
+file_readable() { [ -r "$1" ] && [ -f "$1" ]; }
 trim() { printf '%s' "$1" | awk '{$1=$1; print}'; }
 is_number() { printf '%s\n' "$1" | awk 'BEGIN{exit 0} {exit !( $0+0 == $0+0 )}'; }
 
-# Config / whitelist
 MODELS_FILE="$GROQBASH_MODELS_DIR/models.txt"
 ALLOWED_MODELS=""
 load_local_config() {
@@ -226,26 +252,26 @@ EOF
   printf '%s\n' "$ALLOWED_MODELS" | sort | head -n1
 }
 
-# Refresh models (Groq-only)
 refresh_models() {
-  local outpath="${1:-$MODELS_FILE}"
-  if [ -z "${GROQ_API_KEY:-}" ]; then
-    printf 'Error: GROQ_API_KEY is required to refresh models.\n' >&2
-    return 1
-  fi
-  local api_url="https://api.groq.com/openai/v1/models" tmpd out errf parsed
+  local outpath="${1:-$MODELS_FILE}" tmpd out errf parsed tmpout
   tmpd="$(make_tmpdir)" || return 1
   out="$tmpd/models.json"; errf="$tmpd/curl.err"
-  dbg "curl -H 'Authorization: Bearer ****' -H 'Content-Type: application/json' $api_url"
-  if ! curl --silent --show-error --max-time 20 -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" "$api_url" -o "$out" 2>"$errf"; then
+  dbg "curl -H 'Authorization: Bearer ****' -H 'Content-Type: application/json' https://api.groq.com/openai/v1/models"
+  if ! curl "${CURL_BASE_OPTS[@]}" -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" "https://api.groq.com/openai/v1/models" -o "$out" 2>"$errf"; then
     dbg "curl stderr:"; head -n 50 "$errf" >&2 || true
     rm -rf "$tmpd"; return 1
   fi
   parsed="$tmpd/parsed_models.txt"
-  grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$out" 2>/dev/null | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' | sort -u > "$parsed" || true
+  jq -r '.data[]?.id // empty' "$out" | sort -u > "$parsed" || true
   if [ -s "$parsed" ]; then
     mkdir -p "$(dirname "$outpath")" 2>/dev/null || true
-    if mv "$parsed" "$outpath" 2>/dev/null; then chmod 600 "$outpath" 2>/dev/null || true; echo "Model list updated: $outpath" >&2; rm -rf "$tmpd"; return 0; else cp "$parsed" "$outpath" 2>/dev/null || true; chmod 600 "$outpath" 2>/dev/null || true; echo "Model list updated: $outpath" >&2; rm -rf "$tmpd"; return 0; fi
+    tmpout="$(mktemp -p "$GROQBASH_TMPDIR" groq-models.XXXX 2>/dev/null || true)"
+    [ -z "$tmpout" ] && tmpout="$outpath.tmp"
+    cat "$parsed" > "$tmpout"
+    mv "$tmpout" "$outpath" 2>/dev/null || cp -f "$tmpout" "$outpath" 2>/dev/null || true
+    chmod 600 "$outpath" 2>/dev/null || true
+    echo "Model list updated: $outpath" >&2
+    rm -rf "$tmpd"; return 0
   else
     echo "ERROR: unable to parse API response for models." >&2
     dbg "Raw response (head):"; head -n 50 "$out" >&2 || true
@@ -291,7 +317,6 @@ while [ $# -gt 0 ]; do
       INSTALL_EXTRAS=1; shift ;;
     --version) printf '%s %s (%s)\n' "$SCRIPT_NAME" "$SCRIPT_VERSION" "$SCRIPT_DATE"; exit 0 ;;
     -h|--help)
-      # External help loading: print help file from extras/docs/help.txt
       help_file="$GROQBASH_EXTRAS_DIR/docs/help.txt"
       if [ -f "$help_file" ]; then
         cat "$help_file"
@@ -312,91 +337,59 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Enforce streaming + json/pretty policy: reject combination
 if [ "${STREAM_MODE:-}" = "true" ] && { [ "$OUTPUT_MODE" = "json" ] || [ "$OUTPUT_MODE" = "pretty" ]; }; then
   echo "Error: --stream is not compatible with --json/--pretty (streaming produces partial JSON). Use --text or --raw for streaming." >&2
   exit 1
 fi
 
-# -------------------------
-# Handle --install-extras (must be explicit)
-# -------------------------
+# --install-extras
 if [ "$INSTALL_EXTRAS" -eq 1 ]; then
-  # Destination base
   dest_base="$GROQBASH_EXTRAS_DIR"
   dest_docs="$dest_base/docs"
   dest_lib="$dest_base/lib"
   dest_prov="$dest_base/providers"
-
-  # Source files bundled with the script (assumed to be in SCRIPTDIR/extras/)
   src_base="$SCRIPTDIR/extras"
   src_docs="$src_base/docs/core-notes.sh"
   src_utils="$src_base/lib/utils.sh"
   src_debug="$src_base/lib/debug.sh"
   src_gemini="$src_base/providers/gemini.sh"
-
-  # Create directories
   if ! mkdir -p "$dest_docs" "$dest_lib" "$dest_prov" 2>/dev/null; then
     echo "Error: cannot create extras directories under $dest_base" >&2
     exit 1
   fi
-
-  # Verify source files exist and copy them
   for src in "$src_docs" "$src_utils" "$src_debug" "$src_gemini"; do
     if [ ! -f "$src" ]; then
       echo "Error: bundled extras file not found: $src" >&2
       exit 1
     fi
   done
-
-  # Copy files (overwrite if present)
-  if ! cp -f "$src_docs" "$dest_docs/"; then
-    echo "Error: failed to copy $src_docs to $dest_docs/" >&2
-    exit 1
-  fi
-  if ! cp -f "$src_utils" "$dest_lib/"; then
-    echo "Error: failed to copy $src_utils to $dest_lib/" >&2
-    exit 1
-  fi
-  if ! cp -f "$src_debug" "$dest_lib/"; then
-    echo "Error: failed to copy $src_debug to $dest_lib/" >&2
-    exit 1
-  fi
-  if ! cp -f "$src_gemini" "$dest_prov/"; then
-    echo "Error: failed to copy $src_gemini to $dest_prov/" >&2
-    exit 1
-  fi
-
-  # Ensure reasonable permissions
+  cp -f "$src_docs" "$dest_docs/" || { echo "Error copying extras"; exit 1; }
+  cp -f "$src_utils" "$dest_lib/" || { echo "Error copying extras"; exit 1; }
+  cp -f "$src_debug" "$dest_lib/" || { echo "Error copying extras"; exit 1; }
+  cp -f "$src_gemini" "$dest_prov/" || { echo "Error copying extras"; exit 1; }
   chmod 644 "$dest_docs/core-notes.sh" 2>/dev/null || true
   chmod 644 "$dest_lib/utils.sh" 2>/dev/null || true
   chmod 644 "$dest_lib/debug.sh" 2>/dev/null || true
   chmod 644 "$dest_prov/gemini.sh" 2>/dev/null || true
-
   printf 'Extras installed under %s/extras/\n' "$GROQBASH_DIR"
   exit 0
 fi
-# -------------------------
 
-# REFRESH MODELS: refresh, list, and optionally set default interactively
+# refresh/list/set default model handling
 if [ "$REFRESH_MODELS" -eq 1 ]; then
   if [ -z "${GROQ_API_KEY:-}" ]; then
     echo "Error: GROQ_API_KEY is required to refresh models." >&2
     exit $GROQBASHERRNOAPIKEY
   fi
-
   refresh_models || exit 1
-
   load_whitelist
   if [ -z "$ALLOWED_MODELS" ]; then
     echo "No models available after refresh." >&2
     exit 1
   fi
-
   echo "Available models:" >&2
   print_models_list() { local i=1; printf '%s\n' "$ALLOWED_MODELS" | while IFS= read -r m; do printf "  %2d) %s\n" "$i" "$m" >&2; i=$((i+1)); done; }
   print_models_list
-
   if [ -t 0 ]; then
     printf "set the model number: " >&2
     read -r sel || sel=""
@@ -420,11 +413,9 @@ if [ "$REFRESH_MODELS" -eq 1 ]; then
   else
     echo "Non-interactive session: default unchanged" >&2
   fi
-
   exit 0
 fi
 
-# LIST MODELS
 if [ "$LIST_MODELS" -eq 1 ]; then
   if [ -f "$MODELS_FILE" ] && [ -s "$MODELS_FILE" ]; then
     cat "$MODELS_FILE"
@@ -435,7 +426,6 @@ if [ "$LIST_MODELS" -eq 1 ]; then
   fi
 fi
 
-# SET DEFAULT MODEL
 if [ -n "$SET_DEFAULT_MODEL" ]; then
   load_whitelist
   if model_in_whitelist "$SET_DEFAULT_MODEL"; then
@@ -449,11 +439,9 @@ if [ -n "$SET_DEFAULT_MODEL" ]; then
   fi
 fi
 
-# Load config & whitelist
 load_local_config
 load_whitelist
 
-# Provider file handling & interactive selection
 PROVIDER_FILE="$GROQBASH_CONFIG_DIR/provider"
 if [ -f "$PROVIDER_FILE" ] && [ -z "${PROVIDER_CLI:-}" ] && [ "$PROVIDER_INTERACTIVE" -eq 0 ]; then
   prov="$(sed -n '1p' "$PROVIDER_FILE" 2>/dev/null || true)"; [ -n "$prov" ] && PROVIDER="$prov"
@@ -483,13 +471,11 @@ EOF
   printf '%s\n' "$chosen" > "$PROVIDER_FILE"; chmod 600 "$PROVIDER_FILE" 2>/dev/null || true; PROVIDER="$chosen"; refresh_models "$GROQBASH_MODELS_DIR/${PROVIDER}.json" || true; exit 0
 fi
 
-# Model-per-provider config
 MODEL_PROVIDER_CFG="$GROQBASH_CONFIG_DIR/model.$PROVIDER"
 if [ -z "${MODEL:-}" ] && [ -f "$MODEL_PROVIDER_CFG" ] && [ -s "$MODEL_PROVIDER_CFG" ]; then
   cand="$(sed -n '1p' "$MODEL_PROVIDER_CFG" 2>/dev/null || true)"; [ -n "$cand" ] && MODEL="$cand"
 fi
 
-# Dynamic default selection (metadata-aware)
 choose_dynamic_model_from_file() {
   local file="$1" result=""
   [ ! -f "$file" ] || [ ! -s "$file" ] && { printf '%s' ""; return 0; }
@@ -519,7 +505,6 @@ if [ -z "${MODEL:-}" ]; then
   [ -n "$cand" ] && MODEL="$cand"
 fi
 
-# Fallbacks
 [ -z "$MODEL" ] && [ -n "${GROQ_MODEL:-}" ] && MODEL="$GROQ_MODEL"
 if [ -z "$MODEL" ] && [ -f "$GROQBASH_CONFIG_DIR/config" ]; then
   cand="$(awk -F= '/^MODEL=/ {sub(/^MODEL=/,""); print $0; exit}' "$GROQBASH_CONFIG_DIR/config" 2>/dev/null || true)"
@@ -527,14 +512,12 @@ if [ -z "$MODEL" ] && [ -f "$GROQBASH_CONFIG_DIR/config" ]; then
 fi
 [ -z "$MODEL" ] && [ -n "$ALLOWED_MODELS" ] && MODEL="$(auto_select_model)"
 
-# Groq API key guard
 if [ -z "${GROQ_API_KEY:-}" ] && [ "$PROVIDER" = "groq" ]; then
   echo "Error: GROQ_API_KEY is not set." >&2
   echo 'Set it like: export GROQ_API_KEY="gsk_XXXXXXXXXXXXX"' >&2
   exit $GROQBASHERRNOAPIKEY
 fi
 
-# Input assembly helpers
 collect_input_from_files() {
   local out="" first=1 f
   for f in "$@"; do
@@ -562,13 +545,16 @@ expand_args_to_content() {
 [ -n "$BATCH_FILE" ] && [ ! -r "$BATCH_FILE" ] && { echo "Error: batch file not readable: $BATCH_FILE" >&2; exit 1; }
 if [ -n "$JSON_INPUT" ]; then
   [ ! -r "$JSON_INPUT" ] && { echo "Error: JSON input file not readable: $JSON_INPUT" >&2; exit $GROQBASHERRINVALID_JSON; }
-  firstchar="$(sed -n '1p' "$JSON_INPUT" | awk '{print substr($0,1,1)}' 2>/dev/null || true)"
-  case "$firstchar" in '{'|'\[') : ;; *) echo "Error: JSON input does not appear to be valid JSON (missing leading { or [)." >&2; exit $GROQBASHERRINVALID_JSON ;; esac
+  if ! jq -e . "$JSON_INPUT" >/dev/null 2>&1; then
+    echo "Error: JSON input is not valid JSON." >&2
+    exit $GROQBASHERRINVALID_JSON
+  fi
 fi
 [ -n "$TEMPLATE" ] && [ ! -f "$GROQBASH_TEMPLATES_DIR/$TEMPLATE" ] && { echo "Error: template not found: $TEMPLATE" >&2; exit 1; }
 
-STDIN_CONTENT=""; [ ! -t 0 ] && STDIN_CONTENT="$(cat -)"
-CONTENT=""
+STDIN_CONTENT=""; [ ! -t 0 ] && STDIN_CONTENT="$(cat - 2>/dev/null || true)"
+CONTENT="${CONTENT:-}"
+
 if [ -n "$JSON_INPUT" ]; then :; else
   if [ "${#FILE_INPUTS[@]}" -gt 0 ]; then
     CONTENT="$(collect_input_from_files "${FILE_INPUTS[@]}")"
@@ -579,7 +565,15 @@ if [ -n "$JSON_INPUT" ]; then :; else
     else [ "${#ARGS[@]}" -gt 0 ] && CONTENT="$(expand_args_to_content)" || CONTENT=""
     fi
     tmpl="$(cat "$GROQBASH_TEMPLATES_DIR/$TEMPLATE")"
-    CONTENT="$(printf '%s' "$tmpl" | awk -v repl="$CONTENT" 'BEGIN{RS=""; ORS="";} {gsub(/\{\{CONTENT\}\}/, repl); print}' )"
+    tmp_tmpl="$(mktemp -p "$GROQBASH_TMPDIR" groq-tmpl.XXXX 2>/dev/null || true)"
+    if [ -n "$tmp_tmpl" ]; then
+      printf '%s' "$tmpl" | awk -v repl="$CONTENT" 'BEGIN{RS=""; ORS="";} {gsub(/\{\{CONTENT\}\}/, repl); print}' > "$tmp_tmpl"
+      mv "$tmp_tmpl" "$tmp_tmpl.final" 2>/dev/null || true
+      CONTENT="$(cat "$tmp_tmpl.final" 2>/dev/null || printf '%s' "$tmpl")"
+      rm -f "$tmp_tmpl" "$tmp_tmpl.final" 2>/dev/null || true
+    else
+      CONTENT="$(printf '%s' "$tmpl" | awk -v repl="$CONTENT" 'BEGIN{RS=""; ORS="";} {gsub(/\{\{CONTENT\}\}/, repl); print}' )"
+    fi
   elif [ -n "$STDIN_CONTENT" ]; then
     CONTENT="$STDIN_CONTENT"
     [ "${#ARGS[@]}" -gt 0 ] && extra="$(expand_args_to_content)" && [ -n "$extra" ] && CONTENT="${CONTENT}"$'\n\n'"$extra"
@@ -593,11 +587,9 @@ if [ -z "$CONTENT" ] && [ -z "$JSON_INPUT" ] && [ "$CHAT_MODE" -eq 0 ] && [ -z "
   exit $GROQBASHERRNO_PROMPT
 fi
 
-# Numeric validation
 is_number "$TEMP" || { echo "Error: --temp must be numeric" >&2; exit 1; }
 is_number "$MAX_TOKENS" || { echo "Error: --max must be numeric" >&2; exit 1; }
 
-# Whitelist guard
 if [ -n "$ALLOWED_MODELS" ] && [ -n "$MODEL" ]; then
   if ! printf '%s\n' "$ALLOWED_MODELS" | grep -x -F -q "$MODEL"; then
     echo "Error: model '$MODEL' not supported or deprecated." >&2
@@ -607,107 +599,145 @@ if [ -n "$ALLOWED_MODELS" ] && [ -n "$MODEL" ]; then
   fi
 fi
 
-# Payload / temp files
-RUN_TMPDIR="$(make_tmpdir)" || { echo "Error: cannot create RUN_TMPDIR in $GROQBASH_TMPDIR" >&2; exit $GROQBASHERRTMP; }
-PAYLOAD="$RUN_TMPDIR/payload.json"
-RESP="$RUN_TMPDIR/resp.json"
-ERRF="$RUN_TMPDIR/err.log"
-trap 'rm -rf "$RUN_TMPDIR"' EXIT INT TERM
+# Use ensure_run_tmpdir to create RUN_TMPDIR consistently (patch D)
+ensure_run_tmpdir
 
-# JSON escaper (minimal)
-escape_json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+PAYLOAD="${PAYLOAD:-$RUN_TMPDIR/payload.json}"
+RESP="${RESP:-$RUN_TMPDIR/resp.json}"
+ERRF="${ERRF:-$RUN_TMPDIR/err.log}"
 
-# Groq payload builder (must remain identical)
-build_payload_groq() {
-  if [ -n "$JSON_INPUT" ]; then cp "$JSON_INPUT" "$PAYLOAD"; return 0; fi
-  local esc_content esc_system stream_flag
-  esc_content="$(escape_json_string "$CONTENT")"
-  esc_system="$(escape_json_string "$SYSTEM_PROMPT")"
-  stream_flag="false"; [ "${STREAM_MODE:-}" = "true" ] && stream_flag="true"
-  if [ -n "$SYSTEM_PROMPT" ]; then
-    cat >"$PAYLOAD" <<EOF
-{"model":"$MODEL","stream":$stream_flag,"temperature":$TEMP,"max_tokens":$MAX_TOKENS,"messages":[{"role":"system","content":"$esc_system"},{"role":"user","content":"$esc_content"}]}
-EOF
-  else
-    cat >"$PAYLOAD" <<EOF
-{"model":"$MODEL","stream":$stream_flag,"temperature":$TEMP,"max_tokens":$MAX_TOKENS,"messages":[{"role":"user","content":"$esc_content"}]}
-EOF
+# -------------------------
+# Centralized dry-run helper (improved)
+# -------------------------
+show_payload_head() {
+  local path="${1:-$PAYLOAD}" lines="${2:-200}"
+  if [ -z "${path:-}" ]; then
+    printf 'DRY-RUN: payload file missing: %s\n' "<unset>" >&2
+    return 1
   fi
+  if [ ! -e "$path" ]; then
+    printf 'DRY-RUN: payload file missing: %s\n' "$path" >&2
+    return 1
+  fi
+  if [ ! -s "$path" ]; then
+    printf 'DRY-RUN: payload exists but is empty: %s\n' "$path" >&2
+    return 0
+  fi
+  printf 'DRY-RUN: payload path: %s\n' "$path" >&2
+  printf 'DRY-RUN: payload (head %d lines):\n' "$lines" >&2
+  head -n "$lines" "$path" 2>/dev/null >&2 || true
+  return 0
 }
 
-# -------------------------
-# Provider module loader with safety checks (STEP 7.2: file-level hardening)
-# -------------------------
+# escape_json_string() is kept as a no-op for compatibility with external providers.
+# It is not used internally by groqbash. Remove only if no provider depends on it.
+escape_json_string() { :; } 
+
+# Build payload with jq preferred; handle JSON_INPUT conversion if needed
+build_payload_groq() {
+  ensure_run_tmpdir
+  local tmp_payload model_in_file model_to_use user_prompt
+  tmp_payload="$(mktemp -p "$RUN_TMPDIR" groq-payload.XXXX 2>/dev/null || true)"
+  [ -z "$tmp_payload" ] && tmp_payload="$RUN_TMPDIR/payload.json.tmp"
+  umask 077
+
+  if [ -n "$JSON_INPUT" ]; then
+    if jq -e 'has("messages")' "$JSON_INPUT" >/dev/null 2>&1; then
+      cp "$JSON_INPUT" "$tmp_payload"
+      mv "$tmp_payload" "$PAYLOAD"
+      chmod 600 "$PAYLOAD" 2>/dev/null || true
+      return 0
+    fi
+    if jq -e 'has("prompt")' "$JSON_INPUT" >/dev/null 2>&1; then
+      user_prompt="$(jq -r '.prompt' "$JSON_INPUT" 2>/dev/null || true)"
+      model_in_file="$(jq -r '.model // empty' "$JSON_INPUT" 2>/dev/null || true)"
+      model_to_use="${model_in_file:-$MODEL}"
+      jq -n --arg model "$model_to_use" \
+            --argjson stream "$( [ "${STREAM_MODE:-}" = "true" ] && printf 'true' || printf 'false' )" \
+            --arg temp "$TEMP" \
+            --arg max_tokens "$MAX_TOKENS" \
+            --arg user "$user_prompt" \
+            '{model:$model, stream:$stream, temperature:($temp|tonumber), max_tokens:($max_tokens|tonumber), messages:[{role:"user",content:$user}] }' >"$tmp_payload"
+      mv "$tmp_payload" "$PAYLOAD"
+      chmod 600 "$PAYLOAD" 2>/dev/null || true
+      return 0
+    fi
+    cp "$JSON_INPUT" "$tmp_payload"
+    mv "$tmp_payload" "$PAYLOAD"
+    chmod 600 "$PAYLOAD" 2>/dev/null || true
+    return 0
+  fi
+
+  if [ -n "${SYSTEM_PROMPT:-}" ]; then
+    jq -n --arg model "$MODEL" \
+          --argjson stream "$( [ "${STREAM_MODE:-}" = "true" ] && printf 'true' || printf 'false' )" \
+          --arg temp "$TEMP" \
+          --arg max_tokens "$MAX_TOKENS" \
+          --arg system "$SYSTEM_PROMPT" \
+          --arg user "$CONTENT" \
+          '{model:$model, stream:$stream, temperature:($temp|tonumber), max_tokens:($max_tokens|tonumber), messages:[{role:"system",content:$system},{role:"user",content:$user}] }' >"$tmp_payload"
+  else
+    jq -n --arg model "$MODEL" \
+          --argjson stream "$( [ "${STREAM_MODE:-}" = "true" ] && printf 'true' || printf 'false' )" \
+          --arg temp "$TEMP" \
+          --arg max_tokens "$MAX_TOKENS" \
+          --arg user "$CONTENT" \
+          '{model:$model, stream:$stream, temperature:($temp|tonumber), max_tokens:($max_tokens|tonumber), messages:[{role:"user",content:$user}] }' >"$tmp_payload"
+  fi
+  mv "$tmp_payload" "$PAYLOAD"
+  chmod 600 "$PAYLOAD" 2>/dev/null || true
+  return 0
+}
+
+# Provider loader (safety checks)
 PROVIDER_MODULE_LOADED=0
 if [ "$PROVIDER" != "groq" ]; then
   provider_module_path="$GROQBASH_EXTRAS_DIR/providers/${PROVIDER}.sh"
   provider_dir="$(dirname "$provider_module_path")"
-
-  # Ensure provider directory exists (it should, but be conservative)
   if [ ! -d "$provider_dir" ]; then
     if ! mkdir -p "$provider_dir" 2>/dev/null; then
       echo "Error: cannot create provider directory: $provider_dir" >&2
       exit 1
     fi
   fi
-
-  # Security check: refuse to load if extras/providers is world-writable
   if _is_world_writable "$provider_dir"; then
     echo "Security error: extras/providers directory is world-writable; refusing to load provider modules." >&2
     exit 1
   fi
-
-  # Optional: warn if owner is not current user (but allow if not world-writable)
   current_user="$(id -un 2>/dev/null || printf '')"
-  owner="$( _get_owner "$provider_dir" )"
+  owner="$(_get_owner "$provider_dir")"
   if [ -n "$owner" ] && [ -n "$current_user" ] && [ "$owner" != "$current_user" ]; then
     dbg "Warning: provider directory $provider_dir is owned by $owner, not $current_user."
-    # Do not fail; only fail on world-writable above.
   fi
-
-  # --- BEGIN STEP 7.2: provider file-level hardening ---
   providerfile="$provider_module_path"
-
-  # Capture pre-check listing for minimal TOCTOU mitigation
-  before="$(ls -ld "$providerfile" 2>/dev/null || true)"
-
-  # 1) Existence check
+  # Patch A: use getfile_signature() wrapper to obtain a stable signature
+  beforesig="$(getfile_signature "$providerfile")"
   if [ ! -f "$providerfile" ]; then
     echo "Provider '$PROVIDER' is not installed. Run --install-extras." >&2
     exit 1
   fi
-
-  # 2) Ownership check
-  file_owner="$(ls -ld "$providerfile" 2>/dev/null | awk '{print $3}' 2>/dev/null || printf '')"
+  file_owner="$(_get_owner "$providerfile")"
   current_user="${USER:-$(id -un 2>/dev/null || printf '')}"
   if [ -n "$file_owner" ] && [ -n "$current_user" ] && [ "$file_owner" != "$current_user" ]; then
     echo "Security error: provider file not owned by current user: $providerfile" >&2
     exit 1
   fi
-
-  # 3) Permission check (no group/world write)
-  perms="$(ls -ld "$providerfile" 2>/dev/null | awk '{print $1}' 2>/dev/null || true)"
+  perms="$(_get_perm_string "$providerfile")"
   group_write="$(printf '%s' "$perms" | awk '{print substr($0,6,1)}')"
   others_write="$(printf '%s' "$perms" | awk '{print substr($0,9,1)}')"
   if [ "$group_write" = "w" ] || [ "$others_write" = "w" ]; then
     echo "Security error: provider file is writable by group or world: $providerfile" >&2
     exit 1
   fi
-
-  # 4) Symlink check
   if [ -L "$providerfile" ]; then
     echo "Security error: provider file is a symlink: $providerfile" >&2
     exit 1
   fi
-
-  # 5) Minimal TOCTOU mitigation: re-check listing
-  after="$(ls -ld "$providerfile" 2>/dev/null || true)"
-  if [ "$before" != "$after" ]; then
+  aftersig="$(getfile_signature "$providerfile")"
+  if [ "$beforesig" != "$aftersig" ]; then
     echo "Security error: provider file changed during validation: $providerfile" >&2
     exit 1
   fi
-  # --- END STEP 7.2 ---
-
   if [ -f "$provider_module_path" ]; then
     # shellcheck source=/dev/null
     . "$provider_module_path"
@@ -718,46 +748,53 @@ if [ "$PROVIDER" != "groq" ]; then
   fi
 fi
 
-# Groq endpoint and curl opts
 API_URL_GROQ="https://api.groq.com/openai/v1/chat/completions"
-CURL_BASE_OPTS="--silent --show-error --no-buffer --max-time 120"
 dbg "API URL: $API_URL_GROQ"
 
-# Groq non-streaming call
+# Non-streaming call
 call_api_groq() {
   if [ -z "${GROQ_API_KEY:-}" ]; then echo "Error: GROQ_API_KEY is not set." >&2; return $GROQBASHERRNOAPIKEY; fi
+  if [ ! -s "${PAYLOAD:-}" ]; then
+    echo "Error: payload file missing or empty: ${PAYLOAD:-<unset>}" >&2
+    echo "Ensure the payload was built (build_payload_from_vars) and contains valid JSON." >&2
+    return $GROQBASHERRTMP
+  fi
+  if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    # wrapper handles showing payload; just skip
+    printf 'DRY-RUN: skipping HTTP call (exit 0)\n' >&2
+    return 0
+  fi
   local http_file time_total http_code
   http_file="$(mktemp -p "$GROQBASH_TMPDIR" groq-http.XXXX 2>/dev/null || true)"
   [ -z "$http_file" ] && { echo "Error: cannot create temporary file for HTTP code." >&2; return $GROQBASHERRTMP; }
-  if [ "${DEBUG:-0}" -eq 1 ]; then
-    dbg "Running curl (non-streaming) with timing..."
-    curl --silent --show-error --max-time 120 -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" --data-binary @"$PAYLOAD" -o "$RESP" -w '%{http_code} %{time_total}' "$API_URL_GROQ" 2>"$ERRF" >"$http_file" || true
-  else
-    curl --silent --show-error --max-time 120 -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" --data-binary @"$PAYLOAD" -o "$RESP" -w '%{http_code} %{time_total}' "$API_URL_GROQ" 2>"$ERRF" >"$http_file" || true
-  fi
+  dbg "Running curl (non-streaming) with timing... (tmpdir: $RUN_TMPDIR)"
+  curl "${CURL_BASE_OPTS[@]}" -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" --data-binary @"$PAYLOAD" -o "$RESP" -w '%{http_code} %{time_total}' "$API_URL_GROQ" 2>"$ERRF" >"$http_file" || true
   read -r http_code time_total < "$http_file" 2>/dev/null || { http_code="$(cat "$http_file" 2>/dev/null || echo "000")"; time_total="0"; }
   rm -f "$http_file" 2>/dev/null || true
   dbg "HTTP code: $http_code"; dbg "Request time (s): $time_total"
   case "$http_code" in 2*) return 0 ;; *) dbg "HTTP error code: $http_code"; dbg "Response (head):"; head -n 200 "$RESP" >&2 || true; dbg "Curl stderr (head):"; head -n 200 "$ERRF" >&2 || true; return $GROQBASHERRAPI ;; esac
 }
 
-# Groq streaming call (SSE parsing preserved)
+# Streaming call
 call_api_streaming_groq() {
   if [ -z "${GROQ_API_KEY:-}" ]; then echo "Error: GROQ_API_KEY is not set." >&2; return $GROQBASHERRNOAPIKEY; fi
+  if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    printf 'DRY-RUN: skipping streaming HTTP call (exit 0)\n' >&2
+    return 0
+  fi
   local start_ts end_ts elapsed rc
   start_ts="$(date +%s.%N 2>/dev/null || date +%s)"
-  [ "${DEBUG:-0}" -eq 1 ] && dbg "Starting streaming curl (Groq)..."
+  dbg "Starting streaming curl (Groq)... (tmpdir: $RUN_TMPDIR)"
   rc=0
-  curl $CURL_BASE_OPTS -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" --data-binary @"$PAYLOAD" "$API_URL_GROQ" 2>"$ERRF" | tee "$RESP" | \
+  curl "${CURL_BASE_OPTS[@]}" -H "Authorization: Bearer $GROQ_API_KEY" -H "Content-Type: application/json" --data-binary @"$PAYLOAD" "$API_URL_GROQ" 2>"$ERRF" | tee "$RESP" | \
   while IFS= read -r line; do
     case "$line" in
       'data: [DONE]'|'data:[DONE]') break ;;
       data:\ * )
         json="${line#data: }"
-        raw="$(printf '%s' "$json" | sed -nE 's/.*"content"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')"
+        raw="$(printf '%s' "$json" | jq -R -c 'fromjson? | (.choices[]?.delta?.content // .choices[]?.message?.content // empty) | select(length>0)' 2>>"$ERRF" || true)"
         if [ -n "$raw" ]; then
-          chunk="$(printf '%s' "$raw" | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g' -e 's/\\\//\//g' | sed -E 's/\\([^\\][^\\]*\\)/\1/g')"
-          printf '%s' "$chunk"
+          printf '%s' "$raw"
         fi
         ;;
       *) ;;
@@ -771,7 +808,6 @@ call_api_streaming_groq() {
   return 0
 }
 
-# Dispatchers (call Groq or provider module functions)
 build_payload_from_vars() {
   case "$PROVIDER" in
     groq) build_payload_groq ;;
@@ -783,6 +819,12 @@ build_payload_from_vars() {
   esac
 }
 call_api_once() {
+  # Intercept DRY_RUN to prevent provider network calls and show payload once
+  if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    show_payload_head "$PAYLOAD" 200 || true
+    printf 'DRY-RUN: skipping provider HTTP call (exit 0)\n' >&2
+    return 0
+  fi
   case "$PROVIDER" in
     groq) call_api_groq ;;
     *)
@@ -793,6 +835,11 @@ call_api_once() {
   esac
 }
 call_api_streaming() {
+  if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    show_payload_head "$PAYLOAD" 200 || true
+    printf 'DRY-RUN: skipping provider streaming HTTP call (exit 0)\n' >&2
+    return 0
+  fi
   case "$PROVIDER" in
     groq) call_api_streaming_groq ;;
     *)
@@ -803,14 +850,20 @@ call_api_streaming() {
   esac
 }
 
-# Extract text (best-effort Groq-style)
+# Extract text robustly: prefer jq when available
 extract_text_from_resp() {
   [ ! -s "$RESP" ] && return 0
-  awk 'BEGIN{RS=""; FS="\n"} { s=$0; if (match(s, /"choices"[[:space:]]*:[[:space:]]*\[/)) { while (match(s, /"content"[[:space:]]*:[[:space:]]*"([^"]*)"/)) { print substr(s, RSTART, RLENGTH); s=substr(s, RSTART+RLENGTH) } } }' "$RESP" 2>/dev/null | sed -E 's/.*"content"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' | sed 's/\\n/\n/g' | sed 's/\\"/"/g' | head -n 1 || true
+  jq -r '
+    ( .choices[]?.message?.content // .choices[]?.delta?.content // empty ) | select(length>0)
+  ' "$RESP" 2>/dev/null | sed 's/\\n/\n/g' | sed 's/\\"/"/g' | head -n 1 || true
   return 0
 }
 
-# finalize_and_output
+extract_api_error() {
+  [ ! -s "$RESP" ] && return 0
+  jq -r '.error?.message // .choices[]?.message?.content // empty' "$RESP" 2>/dev/null | head -n1 || true
+}
+
 finalize_and_output() {
   local mode="$1" text="$2"
   case "$mode" in
@@ -825,13 +878,20 @@ finalize_and_output() {
     [ "${FORCE_SAVE_MODE:-}" = "nosave" ] && return 0
     local len do_save=0 tmpf dest_dir dest_path
     len="$(printf '%s' "$text" | wc -c | tr -d ' ')"
-    [ "${FORCE_SAVE_MODE:-}" = "save" ] && do_save=1 || { [ "$len" -gt "$THRESHOLD" ] && do_save=1; }
+    # Patch C: replace A && B || C with explicit if for clarity and robustness
+    if [ "${FORCE_SAVE_MODE:-}" = "save" ]; then
+      do_save=1
+    else
+      if [ "$len" -gt "$THRESHOLD" ]; then
+        do_save=1
+      fi
+    fi
     if [ "$do_save" -eq 1 ]; then
       if [ -n "$OUT_PATH" ]; then
         if [ -d "$OUT_PATH" ]; then dest_dir="$OUT_PATH"; dest_path="$dest_dir/$(date +%Y%m%d-%H%M%S)-groq-output-$$.txt"; else dest_path="$OUT_PATH"; dest_dir="$(dirname "$dest_path")"; fi
       else dest_dir="$GROQBASH_HISTORY_DIR"; dest_path="$dest_dir/$(date +%Y%m%d-%H%M%S)-groq-output-$$.txt"; fi
       mkdir -p "$dest_dir" 2>/dev/null || true
-      tmpf="$(mktemp -p "$GROQBASH_TMPDIR" groq-out.XXXX 2>/dev/null || true)"
+      tmpf="$(mktemp -p "$RUN_TMPDIR" groq-out.XXXX 2>/dev/null || true)"
       [ -z "$tmpf" ] && { echo "Error: cannot create temporary file for saving. Skipping save." >&2; return 1; }
       printf '%s\n' "$text" > "$tmpf"
       if mv "$tmpf" "$dest_path" 2>/dev/null; then chmod 600 "$dest_path" 2>/dev/null || true; echo "Output saved to: $dest_path" >&2; else echo "Output saved to (tmp): $tmpf" >&2; fi
@@ -839,18 +899,21 @@ finalize_and_output() {
   fi
 }
 
-# perform_request_once
 perform_request_once() {
   local attempt=1 rc
   while [ "$attempt" -le "$MAX_RETRIES" ]; do
     if call_api_once; then
+      # If dry-run was requested, call_api_once already skipped HTTP and showed payload.
+      if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        printf 'DRY-RUN: request simulated successfully. Payload: %s\n' "$PAYLOAD" >&2
+        return 0
+      fi
       local text
       text="$(extract_text_from_resp || true)"
       if [ -z "$text" ] && [ "$OUTPUT_MODE" != "json" ] && [ "$OUTPUT_MODE" != "pretty" ]; then
-        api_err="$(grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' "$RESP" 2>/dev/null | sed -E 's/.*"message"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' | head -n1 || true)"
-        api_code="$(grep -o '"code"[[:space:]]*:[[:space:]]*[^,}]*' "$RESP" 2>/dev/null | sed -E 's/.*"code"[[:space:]]*:[[:space:]]*"[[:space:]]*([^"]*)".*/\1/' | head -n1 || true)"
+        api_err="$(extract_api_error || true)"
         if [ -n "$api_err" ]; then
-          [ -n "$api_code" ] && echo "API error: ${api_err} (code: ${api_code})" >&2 || echo "API error: ${api_err}" >&2
+          echo "API error: ${api_err}" >&2
           return $GROQBASHERRAPI
         else
           echo "Error: no textual content extracted from response." >&2
@@ -902,7 +965,7 @@ if [ "$CHAT_MODE" -eq 1 ]; then
   exit 0
 fi
 
-# Final single request (streaming vs non-streaming)
+# Final single request
 if [ "${STREAM_MODE:-}" = "true" ]; then
   build_payload_from_vars
   if call_api_streaming; then dbg "Streaming completed; captured response in $RESP"; printf '\n'; exit 0; else echo "Error: streaming request failed." >&2; exit $GROQBASHERRCURL_FAILED; fi
@@ -916,8 +979,7 @@ else
     else printf '%s\n' "$CONTENT" >&2; fi
     printf '%b\n' "\033[1;32mGroq ($MODEL):\033[0m" >&2
   fi
+  build_payload_from_vars
   perform_request_once || exit 1
   exit 0
 fi
-
-# End groqbash
