@@ -14,7 +14,7 @@ Download it, make it executable, export your API key, and start using it immedia
 
 It targets Unix‑like environments: **Linux**, **macOS**, **WSL**, **Termux**.
 
-> ![English](https://img.shields.io/badge/EN-English-orange?style=flat)  
+> [![English](https://img.shields.io/badge/EN-English-orange?style=flat)](#)
 > English is not my first language.  
 > Simple English is welcome — I will always try to respond clearly.
 
