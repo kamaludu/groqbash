@@ -110,7 +110,7 @@ Tutto il codice viene comunque rivisto manualmente per garantire:
 
 ## 📜 Licenza
 
-Qualsiasi idea o suggerimento condiviso tramite issue potrà essere integrato nel progetto sotto licenza **GPLv3**.
+Qualsiasi idea o suggerimento condiviso tramite issue potrà essere integrato nel progetto sotto [licenza **GPLv3**](LICENSE).
 
 Grazie per la comprensione e per l’interesse verso GroqBash.
 
@@ -224,6 +224,6 @@ All code is manually reviewed to ensure:
 
 ## 📜 License
 
-Any idea or suggestion shared through issues may be integrated into the project under the **GPLv3** license.
+Any idea or suggestion shared through issues may be integrated into the project under the [**GPLv3** license](LICENSE).
 
 Thank you for your understanding and interest in GroqBash.
