@@ -1,11 +1,12 @@
+
 [![GroqBash](https://img.shields.io/badge/_GroqBash_-00aa55?style=for-the-badge&label=%E2%9E%9C&labelColor=004d00)](README.md)
 
-# SECURITY POLICY &nbsp; [![English](https://img.shields.io/badge/EN-English_version-orange?style=flat)](SECURITY-en.md) 
+# SECURITY POLICY &nbsp; [![English](https://img.shields.io/badge/EN-English_version-orange?style=flat)](SECURITY-en.md)
 
 # GroqBash — Politica di Sicurezza
 
-GroqBash è uno script Bash singolo progettato con forte attenzione a sicurezza, portabilità e trasparenza.  
-Questo documento descrive il **modello di minaccia**, le **aspettative di utilizzo**, le **limitazioni note** e il processo di **responsible disclosure**.
+GroqBash è uno script Bash singolo progettato con forte attenzione a **sicurezza**, **portabilità** e **trasparenza**.  
+Questo documento descrive il **modello di minaccia**, le **assunzioni di sicurezza**, le **limitazioni note**, le **raccomandazioni** e il processo di **responsible disclosure**.
 
 ---
 
@@ -39,7 +40,7 @@ GroqBash **non** è progettato per:
 - sistemi dove le variabili d’ambiente possono essere manipolate da terzi  
 - scenari che richiedono sandboxing forte o separazione dei privilegi  
 
-### Assunzioni fondamentali
+## Assunzioni fondamentali
 
 GroqBash assume che:
 
@@ -55,15 +56,13 @@ GroqBash assume che:
 
 # 3. Principi di sicurezza
 
-GroqBash segue questi principi:
-
-### ✔ Nessuna esecuzione dell’output del modello  
+## ✔ Nessuna esecuzione dell’output del modello  
 GroqBash **non esegue mai** le risposte API come comandi shell.
 
-### ✔ Nessun `eval`  
+## ✔ Nessun `eval`  
 Lo script non utilizza `eval` o costrutti equivalenti.
 
-### ✔ Nessun uso di `/tmp`  
+## ✔ Nessun uso di `/tmp`  
 I file temporanei interni **non** vengono mai creati in `/tmp`.  
 GroqBash usa:
 
@@ -72,10 +71,10 @@ GroqBash usa:
 
 I temporanei sono creati con:
 
-- `mktemp -d`
+- `mktemp -d`  
 - permessi `700`
 
-### ✔ Hardened provider loading  
+## ✔ Hardened provider loading  
 Prima di eseguire un provider, GroqBash verifica:
 
 - esistenza del file  
@@ -86,11 +85,10 @@ Prima di eseguire un provider, GroqBash verifica:
 - directory non world‑writable  
 - mitigazione TOCTOU tramite controlli pre/post  
 
-### ✔ Nessun fallback nascosto  
-La selezione del modello è esplicita e validata.  
+## ✔ Nessun fallback nascosto  
 Se la lista modelli è vuota, GroqBash fallisce in modo sicuro.
 
-### ✔ Dipendenze minime  
+## ✔ Dipendenze minime  
 Solo strumenti Unix standard sono richiesti.  
 Strumenti opzionali (`jq`, `python3`) migliorano la robustezza ma non sono obbligatori.
 
@@ -98,62 +96,59 @@ Strumenti opzionali (`jq`, `python3`) migliorano la robustezza ma non sono obbli
 
 # 4. Limitazioni note
 
-GroqBash è uno script Bash, non un runtime sandboxato.  
-Le seguenti limitazioni sono intrinseche:
+GroqBash è uno script Bash, non un runtime sandboxato.
 
-### ⚠ Rischi TOCTOU residui  
-I controlli e il sourcing avvengono in sequenza; Bash non può eliminare completamente i race condition.
+## ⚠ Rischi TOCTOU residui  
+Bash non può eliminare completamente i race condition.
 
-### ⚠ I provider sono codice  
-I file in `extras/providers/` vengono **eseguiti nella shell**.  
+## ⚠ I provider sono codice  
+Gli script in `extras/providers/` vengono **eseguiti nella shell**.  
 Devono essere:
 
 - di tua proprietà  
 - non scrivibili da altri  
 - conservati in directory fidate  
 
-### ⚠ Le variabili d’ambiente sono considerate fidate  
-Variabili come:
+## ⚠ Le variabili d’ambiente sono considerate fidate  
+Esempi:
 
 - `GROQBASHEXTRASDIR`
 - `GROQBASHTMPDIR`
 - `GROQ_API_KEY`
 - `GROQ_MODEL`
 
-sono trattate come configurazione controllata dall’utente.
+## ⚠ Parsing JSON/SSE best‑effort  
+Basato su `sed`/`awk`/`grep`.  
+Robusto, ma non equivalente a un parser completo.
 
-### ⚠ Parsing JSON/SSE best‑effort  
-GroqBash usa `sed`/`awk`/`grep`.  
-Robusto per uso normale, ma non equivalente a un parser JSON completo.
-
-### ⚠ Nessun isolamento multi‑utente  
+## ⚠ Nessun isolamento multi‑utente  
 GroqBash non tenta di isolarsi da altri utenti sullo stesso sistema.
 
 ---
 
 # 5. Raccomandazioni per un uso sicuro
 
-### ✔ Conserva GroqBash in una directory di tua proprietà
+## ✔ Conserva GroqBash in una directory di tua proprietà
 
-`sh
+`CODEON
 mkdir -p "$HOME/.local/bin"
-`
+CODEOFF`
 
-### ✔ Mantieni sicure le directory degli extras
+## ✔ Mantieni sicure le directory degli extras
 
-`sh
+`CODEON
 chmod 700 "$GROQBASHEXTRASDIR"
 chmod -R go-w "$GROQBASHEXTRASDIR"
-`
+CODEOFF`
 
-### ✔ Installa provider solo da fonti fidate  
+## ✔ Installa provider solo da fonti fidate  
 I provider sono script shell eseguiti direttamente.
 
-### ✔ Evita ambienti condivisi o ostili  
+## ✔ Evita ambienti condivisi o ostili  
 GroqBash non è progettato per server multi‑tenant.
 
-### ✔ Usa `--debug` solo in ambienti sicuri  
-La modalità debug conserva i file temporanei, che possono contenere dati sensibili.
+## ✔ Usa `--debug` solo in ambienti sicuri  
+La modalità debug conserva file temporanei potenzialmente sensibili.
 
 ---
 
@@ -169,19 +164,19 @@ Includi:
 
 - descrizione chiara del problema  
 - passi per riprodurlo  
-- dettagli sull’ambiente (OS, versione Bash, Termux/macOS/etc.)  
-- se il problema permette esecuzione di codice, escalation o esposizione dati  
+- dettagli sull’ambiente (OS, Bash, Termux/macOS/etc.)  
+- impatto potenziale (esecuzione codice, escalation, esposizione dati)
 
-Rispondiamo normalmente entro **72 ore**.
+Tempo di risposta tipico: **entro 72 ore**.
 
 ---
 
 # 7. Responsible Disclosure
 
 - Non aprire issue pubblici per vulnerabilità.  
-- Non pubblicare dettagli prima che una fix sia disponibile.  
+- Non pubblicare dettagli prima della fix.  
 - La disclosure coordinata è apprezzata.  
-- Il riconoscimento pubblico è opzionale (anonimato su richiesta).
+- Il riconoscimento pubblico è opzionale.
 
 ---
 
@@ -189,20 +184,20 @@ Rispondiamo normalmente entro **72 ore**.
 
 GroqBash include strumenti opzionali in `extras/security/`:
 
-- `verify.sh` — controlla integrità provider (permessi, owner, symlink, checksum)  
-- `validate-env.sh` — verifica sicurezza delle directory e variabili d’ambiente  
+- `verify.sh` — controlla integrità provider  
+- `validate-env.sh` — verifica sicurezza ambiente  
 
-Questi strumenti sono **opzionali** e non modificano il comportamento del core.
+Non modificano il comportamento del core.
 
 ---
 
 # 9. Note finali
 
 GroqBash è costruito con forte attenzione alla sicurezza, ma resta uno script Bash.  
-Gli utenti devono comprendere le sue assunzioni e limitazioni prima di usarlo in ambienti sensibili.
+L’utente deve comprendere le sue assunzioni e limitazioni prima di usarlo in ambienti sensibili.
 
-Per la documentazione completa, vedi:
+Documentazione completa:
 
-- **README.md**  
-- **INSTALL.md**  
-- **CHANGELOG.md**
+- **[README](README.md)**  
+- **[INSTALL](INSTALL.md)**  
+- **[CHANGELOG](CHANGELOG.md)**
