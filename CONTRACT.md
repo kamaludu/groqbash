@@ -1,3 +1,5 @@
+[![GroqBash](https://img.shields.io/badge/_GroqBash_-00aa55?style=for-the-badge&label=%E2%9E%9C&labelColor=004d00)](README.md)
+
 # CONTRACT.md — Provider Contract  
 Documento bilingue: Italiano / English  
 GroqBash 1.0.0
