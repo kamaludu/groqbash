@@ -46,7 +46,7 @@ GroqBash is designed for **single‑user environments** (your laptop, your Termu
 - The script does **not** execute model output as shell commands.  
 - Residual TOCTOU risks and JSON/SSE parsing limitations are documented and acceptable for a hardened Bash script.
 
-For full details, see **SECURITY.md**.
+For full details, see **[SECURITY](SECURITY-en.md)**.
 
 ---
 
@@ -68,7 +68,7 @@ For full details, see **SECURITY.md**.
 
 ## Installation
 
-Full instructions are available in **[INSTALL.md](INSTALL.md)**.
+Full instructions are available in **[INSTALL](INSTALL-en.md)**.
 
 Quick start:
 
