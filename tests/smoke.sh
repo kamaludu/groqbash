@@ -51,7 +51,6 @@ mktemp_safe() {
 # 1) --version (sanity check)
 echo "1) Verifica --version"
 set +e
-# Use sh -c to support GROQSH being a string like "bash ./bin/groqbash"
 sh -c "$GROQSH --version" >/dev/null 2>&1
 VER_EXIT=$?
 set -e
@@ -95,7 +94,6 @@ DRY_LOG="$(mktemp_safe groqbash-dry.XXXXXX)" || { rm -f "$INPUT_FILE"; echo "Can
 
 # Run groqbash with stdin redirected from the input file; capture stdout+stderr in DRY_LOG
 set +e
-# Use sh -c so GROQSH can be a string like "bash ./bin/groqbash"
 sh -c "DEBUG=1 $GROQSH --dry-run <\"$INPUT_FILE\"" >"$DRY_LOG" 2>&1
 DRY_EXIT=$?
 DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
@@ -107,11 +105,49 @@ sed -n '1,200p' "$DRY_LOG" || true
 echo "=== DEBUG: TMPDIR listing (first 50) ==="
 ls -la "${TMPDIR:-/tmp}" | sed -n '1,50p' || true
 
+# If DRY_LOG is empty or exit non-zero, search for groqbash internal tmp dir and print its logs
+if [ -z "$DRY_OUT" ] || [ $DRY_EXIT -ne 0 ]; then
+  echo
+  echo "=== DEBUG: DRY_LOG vuoto o exit non-zero; cerco log interni di groqbash ==="
+
+  # Candidate locations to search for groqbash internal tmp dirs
+  CANDIDATES=(./groqbash.d/tmp "${HOME}/.cache/groq_tmp" "${TMPDIR:-/tmp}" /tmp)
+
+  found=0
+  for d in "${CANDIDATES[@]}"; do
+    if [ -d "$d" ]; then
+      # find most recent groq.* subdir
+      latest="$(ls -td "$d"/groq.* 2>/dev/null | head -n1 || true)"
+      if [ -n "$latest" ] && [ -d "$latest" ]; then
+        echo "Found internal tmp dir: $latest"
+        echo "Listing $latest:"
+        ls -la "$latest" | sed -n '1,200p' || true
+
+        # Print common internal logs if present
+        for f in groq-dry.log payload.json resp.json err.log groq-debug.log groq-verbose.log; do
+          if [ -f "$latest/$f" ]; then
+            echo "=== DEBUG: $latest/$f (head 200 lines) ==="
+            sed -n '1,200p' "$latest/$f" || true
+          fi
+        done
+
+        found=1
+        break
+      fi
+    fi
+  done
+
+  if [ $found -eq 0 ]; then
+    echo "Nessuna directory interna groq.* trovata nelle posizioni candidate."
+  fi
+fi
+
 # Remove the input file now that we've captured the log
 rm -f "$INPUT_FILE" || true
 INPUT_FILE=""
 
 if [ $DRY_EXIT -ne 0 ]; then
+  echo
   echo "  FAIL: --dry-run ha restituito exit code $DRY_EXIT"
   echo "  Output (raw DRY_LOG mostrato sopra):"
   echo "$DRY_OUT"
