@@ -2,13 +2,19 @@
 set -euo pipefail
 
 # tests/smoke.sh
-# Smoke tests minimi per GroqBash: --version e --dry-run (diagnostica robusta)
+# Robust smoke test per GroqBash --dry-run
+# - Individua il binario in modo robusto
+# - Cattura l'output completo di --dry-run
+# - Estrae JSON candidato dopo il marker "DRY-RUN: payload path:" oppure con fallback alla prima riga che inizia con { o [
+# - Pulisce spazi iniziali e valida con jq (o python3 come fallback)
+# - Fallisce solo se non trova JSON o la validazione fallisce
+#
 # Exit codes:
 #  0 = success
-#  1 = generic failure (test assertion)
+#  1 = test assertion failure
 #  2 = environment/setup failure
 
-# Locate groqbash: prefer ./bin/groqbash if executable, otherwise run it with bash
+# --- Locate groqbash binary robustly
 if [ -x "./bin/groqbash" ]; then
   GROQSH="./bin/groqbash"
 elif [ -f "./bin/groqbash" ]; then
@@ -24,16 +30,16 @@ fi
 echo "Eseguo smoke test su: $GROQSH"
 echo
 
-# TMPDIR fallback and checks
+# --- TMPDIR fallback and checks
 TMPDIR_FALLBACK="${HOME}/.cache/groq_tmp"
 export TMPDIR="${TMPDIR:-$TMPDIR_FALLBACK}"
 mkdir -p "$TMPDIR" 2>/dev/null || true
 if [ ! -d "$TMPDIR" ] || [ ! -w "$TMPDIR" ]; then
-  echo "ERRORE: TMPDIR ($TMPDIR) non esistente o non scrivibile"
+  echo "FAIL: TMPDIR ($TMPDIR) non esistente o non scrivibile"
   exit 2
 fi
 
-# mktemp helper that prefers TMPDIR
+# --- mktemp helper preferring TMPDIR
 mktemp_safe() {
   local pattern="$1"
   local tmp
@@ -48,172 +54,179 @@ mktemp_safe() {
   return 1
 }
 
-# 1) --version (sanity check)
+# --- --version sanity check (non-fatal)
 echo "1) Verifica --version"
 set +e
 sh -c "$GROQSH --version" >/dev/null 2>&1
 VER_EXIT=$?
 set -e
 if [ $VER_EXIT -ne 0 ]; then
-  echo "  FAIL: --version fallito (exit $VER_EXIT)"
-  echo "  Nota: continuerò con i test diagnostici per raccogliere informazioni utili."
+  echo "  WARN: --version fallito (exit $VER_EXIT) — continuo con diagnostica"
 else
   echo "  OK: --version eseguito"
 fi
 
-# 2) --dry-run (principale: stdin via file redirection)
-echo
-echo "2) Verifica --dry-run (principale: stdin via file redirection)"
-
-# Ensure a minimal local whitelist for local runs (CI usually sets this)
+# --- Prepare minimal whitelist if missing (safe, non-invasive)
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/groq"
 MODELS_FILE="$CONFIG_DIR/models.txt"
 if [ ! -s "$MODELS_FILE" ]; then
   mkdir -p "$CONFIG_DIR"
   echo "test-model-001" > "$MODELS_FILE"
-  chmod 600 "$MODELS_FILE"
+  chmod 600 "$MODELS_FILE" || true
   echo "  Nota: whitelist temporanea creata in $MODELS_FILE"
 fi
 
+# --- Prepare input and capture files
 PROMPT_TEXT="test payload"
-export PROMPT_TEXT
+INPUT_FILE="$(mktemp_safe groqbash-in.XXXXXX)" || { echo "FAIL: cannot create input file"; exit 2; }
+printf '%s' "$PROMPT_TEXT" >"$INPUT_FILE"
 
-# Prepare temp files and ensure cleanup on exit
-DRY_LOG=""
-INPUT_FILE=""
+DRY_LOG="$(mktemp_safe groqbash-dry.XXXXXX)" || { rm -f "$INPUT_FILE"; echo "FAIL: cannot create dry log"; exit 2; }
+
 cleanup() {
   [ -n "${DRY_LOG:-}" ] && [ -f "$DRY_LOG" ] && rm -f "$DRY_LOG"
   [ -n "${INPUT_FILE:-}" ] && [ -f "$INPUT_FILE" ] && rm -f "$INPUT_FILE"
 }
 trap cleanup EXIT
 
-# Create input file and dry log deterministically
-INPUT_FILE="$(mktemp_safe groqbash-in.XXXXXX)" || { echo "Cannot create input file"; exit 2; }
-printf '%s' "$PROMPT_TEXT" >"$INPUT_FILE"
-DRY_LOG="$(mktemp_safe groqbash-dry.XXXXXX)" || { rm -f "$INPUT_FILE"; echo "Cannot create dry log"; exit 2; }
-
-# Run groqbash with stdin redirected from the input file; capture stdout+stderr in DRY_LOG
+# --- Run groqbash --dry-run capturing stdout+stderr
 set +e
+# DEBUG=1 is safe for diagnostics; does not change groqbash logic here
 sh -c "DEBUG=1 $GROQSH --dry-run <\"$INPUT_FILE\"" >"$DRY_LOG" 2>&1
 DRY_EXIT=$?
 DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
 set -e
 
-# Diagnostic output: always show head of dry log and TMPDIR listing to help CI debugging
-echo "=== DEBUG: DRY_LOG ($DRY_LOG) head ==="
+# Always show a short head to help CI debugging
+echo "=== DEBUG: DRY_LOG head ==="
 sed -n '1,200p' "$DRY_LOG" || true
 echo "=== DEBUG: TMPDIR listing (first 50) ==="
 ls -la "${TMPDIR:-/tmp}" | sed -n '1,50p' || true
+echo
 
-# If DRY_LOG is empty or exit non-zero, search for groqbash internal tmp dir and print its logs
+# If output empty or non-zero exit, try to surface internal groqbash logs (best-effort)
 if [ -z "$DRY_OUT" ] || [ $DRY_EXIT -ne 0 ]; then
-  echo
   echo "=== DEBUG: DRY_LOG vuoto o exit non-zero; cerco log interni di groqbash ==="
-
-  # Candidate locations to search for groqbash internal tmp dirs
-  CANDIDATES=(./groqbash.d/tmp "${HOME}/.cache/groq_tmp" "${TMPDIR:-/tmp}" /tmp /var/tmp)
-
+  CANDIDATES=(./bin/groqbash.d/tmp ./groqbash.d/tmp "${HOME}/.cache/groq_tmp" "${TMPDIR:-/tmp}" /tmp /var/tmp)
   found=0
   for d in "${CANDIDATES[@]}"; do
     if [ -d "$d" ]; then
-      # find most recent groq.* subdir
       latest="$(ls -td "$d"/groq.* 2>/dev/null | head -n1 || true)"
       if [ -n "$latest" ] && [ -d "$latest" ]; then
         echo "Found internal tmp dir: $latest"
-        echo "Listing $latest:"
         ls -la "$latest" | sed -n '1,200p' || true
-
-        # Print common internal logs if present
-        for f in groq-dry.log payload.json resp.json err.log groq-debug.log groq-verbose.log; do
+        for f in payload.json groq-dry.log resp.json err.log groq-debug.log groq-verbose.log; do
           if [ -f "$latest/$f" ]; then
-            echo "=== DEBUG: $latest/$f (head 200 lines) ==="
+            echo "=== DEBUG: $latest/$f (head 200) ==="
             sed -n '1,200p' "$latest/$f" || true
           fi
         done
-
         found=1
         break
       fi
     fi
   done
-
   if [ $found -eq 0 ]; then
     echo "Nessuna directory interna groq.* trovata nelle posizioni candidate."
   fi
 fi
 
-# Remove the input file now that we've captured the log
-rm -f "$INPUT_FILE" || true
-INPUT_FILE=""
-
+# If groqbash returned non-zero, fail with diagnostics
 if [ $DRY_EXIT -ne 0 ]; then
   echo
-  echo "  FAIL: --dry-run ha restituito exit code $DRY_EXIT"
-  echo "  Output (raw DRY_LOG mostrato sopra):"
+  echo "FAIL: --dry-run ha restituito exit code $DRY_EXIT"
+  echo "Output (raw DRY_LOG mostrato sopra):"
   echo "$DRY_OUT"
-  echo
-  echo "Suggerimenti diagnostici:"
-  echo "- Se DRY_LOG è vuoto, verifica che il comando GroqBash sia eseguibile nella forma scelta (./bin/groqbash o bash ./bin/groqbash)."
-  echo "- Se DRY_LOG contiene 'no prompt provided' o simili, il file di input non è stato letto correttamente; la redirezione da file usata qui è la forma più deterministica."
-  echo "- Controlla whitelist modelli e permessi TMPDIR."
   exit 1
 fi
 
-# Trim leading/trailing whitespace
+# --- Trim leading/trailing whitespace from captured output
 DRY_OUT_TRIMMED="$(printf '%s' "$DRY_OUT" | sed -e 's/^[[:space:]\n\r]*//' -e 's/[[:space:]\n\r]*$//')"
 
 if [ -z "$DRY_OUT_TRIMMED" ]; then
-  echo "  FAIL: --dry-run non ha prodotto output"
+  echo "FAIL: --dry-run non ha prodotto output"
   exit 1
 fi
 
-# Extract only the JSON portion: find first line that begins (optionally after whitespace) with { or [
-LINENO="$(printf '%s\n' "$DRY_OUT_TRIMMED" | grep -n -m1 '^[[:space:]]*[{[]' | cut -d: -f1 || true)"
+# --- Extraction strategy:
+# 1) If a line beginning with "DRY-RUN: payload path:" exists, consider everything after that line as candidate JSON.
+#    If the same marker line contains JSON after the marker, use that substring.
+# 2) Otherwise fallback to first line that begins with { or [ and take from there to EOF.
 
-if [ -z "$LINENO" ]; then
-  echo "  FAIL: impossibile trovare l'inizio del JSON nell'output"
-  echo "  Output completo:"
+JSON_CANDIDATE=""
+MARK_LINE_NUM="$(grep -n -m1 '^DRY-RUN: payload path:' "$DRY_LOG" | cut -d: -f1 || true)"
+
+if [ -n "$MARK_LINE_NUM" ]; then
+  MARK_LINE="$(sed -n "${MARK_LINE_NUM}p" "$DRY_LOG" || true)"
+  AFTER_MARK="$(printf '%s' "$MARK_LINE" | sed -e 's/^DRY-RUN: payload path:[[:space:]]*//')"
+  # If remainder of marker line starts with { or [, use it
+  first_char="$(printf '%s' "$AFTER_MARK" | sed -e 's/^[[:space:]]*//' -e 's/^\(.\).*/\1/' || true)"
+  if [ "$first_char" = "{" ] || [ "$first_char" = "[" ]; then
+    JSON_CANDIDATE="$AFTER_MARK"
+  else
+    # take everything after the marker line to EOF as candidate
+    JSON_CANDIDATE="$(sed -n "$((MARK_LINE_NUM + 1)),\$p" "$DRY_LOG" || true)"
+  fi
+fi
+
+# Fallback: first line that begins with { or [
+if [ -z "$JSON_CANDIDATE" ] || [ -z "$(printf '%s' "$JSON_CANDIDATE" | sed -e '1,/[^[:space:]\n\r]/!d')" ]; then
+  FIRST_JSON_LINE="$(printf '%s\n' "$DRY_OUT_TRIMMED" | grep -n -m1 '^[[:space:]]*[{[]' | cut -d: -f1 || true)"
+  if [ -n "$FIRST_JSON_LINE" ]; then
+    JSON_CANDIDATE="$(printf '%s\n' "$DRY_OUT_TRIMMED" | tail -n +"$FIRST_JSON_LINE" || true)"
+  fi
+fi
+
+# Trim leading whitespace/newlines from candidate
+JSON_CANDIDATE="$(printf '%s' "$JSON_CANDIDATE" | sed -e '1,/[^[:space:]\n\r]/!d')"
+
+# Final checks
+if [ -z "$JSON_CANDIDATE" ]; then
+  echo "FAIL: nessun JSON candidato trovato nell'output di --dry-run"
+  echo "Output completo:"
   echo "$DRY_OUT_TRIMMED"
   exit 1
 fi
 
-JSON_ONLY="$(printf '%s\n' "$DRY_OUT_TRIMMED" | tail -n +"$LINENO")"
-
-# Validate JSON: prefer jq, fallback to python3, fallback to heuristic
+# --- Validate JSON: prefer jq, fallback to python3
 if command -v jq >/dev/null 2>&1; then
-  if printf '%s' "$JSON_ONLY" | jq . >/dev/null 2>&1; then
-    echo "  OK: --dry-run ha stampato JSON valido (jq)"
+  if printf '%s' "$JSON_CANDIDATE" | jq . >/dev/null 2>&1; then
+    echo "OK: --dry-run ha prodotto JSON valido (validato con jq)"
+    echo
+    echo "Tutti i test smoke sono passati."
+    exit 0
   else
-    echo "  FAIL: JSON non valido (jq)"
-    echo "  Estratto JSON:"
-    echo "$JSON_ONLY"
+    echo "FAIL: JSON estratto non valido (jq)"
+    echo "Estratto JSON (head 200):"
+    printf '%s\n' "$JSON_CANDIDATE" | sed -n '1,200p'
     exit 1
   fi
 elif command -v python3 >/dev/null 2>&1; then
-  if printf '%s' "$JSON_ONLY" | python3 -c 'import sys,json; json.load(sys.stdin)' >/dev/null 2>&1; then
-    echo "  OK: --dry-run ha stampato JSON valido (python3)"
+  if printf '%s' "$JSON_CANDIDATE" | python3 -c 'import sys,json; json.load(sys.stdin)' >/dev/null 2>&1; then
+    echo "OK: --dry-run ha prodotto JSON valido (validato con python3)"
+    echo
+    echo "Tutti i test smoke sono passati."
+    exit 0
   else
-    echo "  FAIL: JSON non valido (python3)"
-    echo "  Estratto JSON:"
-    echo "$JSON_ONLY"
+    echo "FAIL: JSON estratto non valido (python3)"
+    echo "Estratto JSON (head 200):"
+    printf '%s\n' "$JSON_CANDIDATE" | sed -n '1,200p'
     exit 1
   fi
 else
-  # Basic heuristic: JSON should start with { or [
-  first_char="$(printf '%s' "$JSON_ONLY" | sed -n '1p' | sed -e 's/^[[:space:]]*//' -e 's/^\(.\).*/\1/')"
+  # Heuristic fallback: ensure it starts with { or [
+  first_char="$(printf '%s' "$JSON_CANDIDATE" | sed -n '1p' | sed -e 's/^[[:space:]]*//' -e 's/^\(.\).*/\1/')"
   if [ "$first_char" = "{" ] || [ "$first_char" = "[" ]; then
-    echo "  WARNING: jq/python3 non installati; output sembra JSON (heuristic)"
-    echo "  Estratto (prima riga):"
-    printf '%s\n' "$JSON_ONLY" | head -n 1
-    echo "  OK (heuristic)"
+    echo "WARNING: jq/python3 non installati; output sembra JSON (heuristic)"
+    echo "Estratto (prima riga):"
+    printf '%s\n' "$JSON_CANDIDATE" | head -n 1
+    echo
+    echo "Tutti i test smoke sono passati (heuristic)"
+    exit 0
   else
-    echo "  FAIL: jq/python3 non disponibili e output non sembra JSON"
-    echo "  Estratto JSON:"
-    echo "$JSON_ONLY"
+    echo "FAIL: jq/python3 non disponibili e output non sembra JSON"
+    echo "Estratto JSON (head 200):"
+    printf '%s\n' "$JSON_CANDIDATE" | sed -n '1,200p'
     exit 1
   fi
 fi
-
-echo
-echo "Tutti i test smoke sono passati."
-exit 0
