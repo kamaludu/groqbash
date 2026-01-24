@@ -8,7 +8,18 @@ set -euo pipefail
 #  1 = generic failure (test assertion)
 #  2 = environment/setup failure
 
-GROQSH="./bin/groqbash"
+# Locate groqbash in common locations: ./bin/groqbash, ./groqbash, or in PATH
+if [ -x "./bin/groqbash" ]; then
+  GROQSH="./bin/groqbash"
+elif [ -x "./groqbash" ]; then
+  GROQSH="./groqbash"
+else
+  if command -v groqbash >/dev/null 2>&1; then
+    GROQSH="$(command -v groqbash)"
+  else
+    GROQSH="./bin/groqbash"
+  fi
+fi
 
 echo "Eseguo smoke test su: $GROQSH"
 echo
@@ -16,6 +27,7 @@ echo
 # Ensure the script exists and is executable
 if [ ! -x "$GROQSH" ]; then
   echo "ERRORE: $GROQSH non trovato o non eseguibile"
+  echo "Verificare che il file sia presente in ./bin/groqbash o ./groqbash, o che sia nel PATH."
   exit 2
 fi
 
@@ -44,24 +56,42 @@ fi
 
 PROMPT_TEXT="test payload"
 
-# Run dry-run but capture stdout+stderr to a file and preserve the real exit code.
+# Prepare temp files and ensure cleanup on exit
+DRY_LOG=""
+INPUT_FILE=""
+cleanup() {
+  [ -n "${DRY_LOG:-}" ] && [ -f "$DRY_LOG" ] && rm -f "$DRY_LOG"
+  [ -n "${INPUT_FILE:-}" ] && [ -f "$INPUT_FILE" ] && rm -f "$INPUT_FILE"
+}
+trap cleanup EXIT
+
 set +e
+
+# Create a log file for groqbash output
 DRY_LOG="$(mktemp -t groqbash-dry.XXXXXX)" || { echo "Cannot create temp file"; exit 2; }
 
-# Ensure DEBUG is exported for groqbash and capture the exit status of groqbash via PIPESTATUS.
-# Note: DEBUG=1 must be in the environment of groqbash, so prefix groqbash, not printf.
-printf '%s' "$PROMPT_TEXT" | DEBUG=1 "$GROQSH" --dry-run >"$DRY_LOG" 2>&1
-# Capture exit code of groqbash (second element of PIPESTATUS)
-DRY_EXIT=${PIPESTATUS[1]:-1}
+# Prefer using tests/good.json if present (more deterministic in CI), otherwise write prompt to a temp input file
+if [ -f tests/good.json ]; then
+  INPUT_ARG="--json-input tests/good.json"
+else
+  INPUT_FILE="$(mktemp -t groqbash-in.XXXXXX)" || { echo "Cannot create input file"; rm -f "$DRY_LOG"; exit 2; }
+  printf '%s' "$PROMPT_TEXT" >"$INPUT_FILE"
+  INPUT_ARG="--json-input $INPUT_FILE"
+fi
+
+# Run groqbash with DEBUG=1 to get diagnostic output (dbg() masks API key).
+# Capture stdout+stderr to DRY_LOG and preserve exit code in DRY_EXIT.
+DEBUG=1 "$GROQSH" --dry-run $INPUT_ARG >"$DRY_LOG" 2>&1
+DRY_EXIT=$?
 
 # show the raw log for diagnosis (will appear in CI logs)
 echo "=== groqbash --dry-run raw output (begin) ==="
-sed -n '1,200p' "$DRY_LOG" || true
+sed -n '1,500p' "$DRY_LOG" || true
 echo "=== groqbash --dry-run raw output (end) ==="
 
 # read the captured output into variable for existing logic
 DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
-rm -f "$DRY_LOG" || true
+
 set -e
 
 if [ $DRY_EXIT -ne 0 ]; then
