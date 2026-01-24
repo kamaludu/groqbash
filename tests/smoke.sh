@@ -44,15 +44,17 @@ fi
 
 PROMPT_TEXT="test payload"
 
-# Run dry-run but capture stdout+stderr to a file and preserve the real exit code.
+# Run dry-run using a temporary input file (avoids pipeline/PIPESTATUS issues)
 set +e
 DRY_LOG="$(mktemp -t groqbash-dry.XXXXXX)" || { echo "Cannot create temp file"; exit 2; }
+INPUT_FILE="$(mktemp -t groqbash-in.XXXXXX)" || { rm -f "$DRY_LOG"; echo "Cannot create input file"; exit 2; }
 
-# Ensure DEBUG is exported for groqbash and capture the exit status of groqbash via PIPESTATUS.
-# Note: DEBUG=1 must be in the environment of groqbash, so prefix groqbash, not printf.
-printf '%s' "$PROMPT_TEXT" | DEBUG=1 "$GROQSH" --dry-run >"$DRY_LOG" 2>&1
-# Capture exit code of groqbash (second element of PIPESTATUS)
-DRY_EXIT=${PIPESTATUS[1]:-1}
+# write prompt to input file
+printf '%s' "$PROMPT_TEXT" >"$INPUT_FILE"
+
+# run groqbash with DEBUG=1 and explicit json-input from file, capture stdout+stderr
+DEBUG=1 "$GROQSH" --dry-run --json-input "$INPUT_FILE" >"$DRY_LOG" 2>&1
+DRY_EXIT=$?
 
 # show the raw log for diagnosis (will appear in CI logs)
 echo "=== groqbash --dry-run raw output (begin) ==="
@@ -61,7 +63,9 @@ echo "=== groqbash --dry-run raw output (end) ==="
 
 # read the captured output into variable for existing logic
 DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
-rm -f "$DRY_LOG" || true
+
+# cleanup
+rm -f "$DRY_LOG" "$INPUT_FILE" || true
 set -e
 
 if [ $DRY_EXIT -ne 0 ]; then
