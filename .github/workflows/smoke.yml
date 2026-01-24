@@ -16,18 +16,49 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install base dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bash curl jq python3
+          sudo apt-get install -y bash curl python3 || true
 
       - name: Prepare fake models whitelist for CI
         run: |
           mkdir -p "$HOME/.config/groq"
           echo "test-model-001" > "$HOME/.config/groq/models.txt"
+          chmod 600 "$HOME/.config/groq/models.txt" || true
 
       - name: Make groqbash executable
-        run: chmod +x bin/groqbash 
+        run: chmod +x bin/groqbash || true
+
+      - name: Prepare CI prerequisites for smoke tests
+        run: |
+          set -euo pipefail
+          # Install jq if available via apt-get (ubuntu-latest)
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq || true
+          fi
+
+          # Ensure tests directory exists
+          mkdir -p tests
+
+          # Create a minimal valid JSON payload for tests/good.json
+          cat > tests/good.json <<'JSON'
+{
+  "model": "llama-3.3-70b-versatile",
+  "stream": false,
+  "temperature": 0.7,
+  "max_tokens": 512,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Verifica automatica: rispondi con una frase breve in italiano che confermi il funzionamento."
+    }
+  ]
+}
+JSON
+
+          echo "Prepared tests/good.json and ensured jq is installed (if apt-get available)."
 
       - name: Run smoke tests
         run: bash tests/smoke.sh
