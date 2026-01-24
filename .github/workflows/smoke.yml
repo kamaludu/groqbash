@@ -1,4 +1,4 @@
-concurrname: Smoke tests minimal
+name: Smoke tests minimal
 
 on:
   push:
@@ -12,6 +12,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Echo
-        run: echo "smoke minimal OK"ency: 
-      
+        run: echo "smoke minimal OK"
