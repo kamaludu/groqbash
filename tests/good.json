@@ -1,0 +1,12 @@
+{
+  "model": "llama-3.3-70b-versatile",
+  "stream": false,
+  "temperature": 0.7,
+  "max_tokens": 512,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Ciao! Questo è un test automatico. Rispondi brevemente con un saluto e chiedi come posso aiutare."
+    }
+  ]
+}
