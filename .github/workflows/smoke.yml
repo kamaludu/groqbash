@@ -41,6 +41,8 @@ jobs:
             echo "ERROR: GROQ_API_KEY secret is not set or is empty. Smoke tests require this secret when running in CI."
             exit 2
           fi
+          # Non stampare il valore del secret; solo conferma presenza
+          echo "GROQ_API_KEY set: ${GROQ_API_KEY:+yes}"
 
       - name: Prepare models whitelist in fixed HOME and internal groqbash models dir
         shell: bash
@@ -86,7 +88,54 @@ jobs:
           echo "tests/good.json:"
           jq . tests/good.json
 
-      - name: Run smoke tests (with DEBUG=1)
+      - name: Quick groqbash sanity checks (--version, --help)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x "./bin/groqbash" ]; then
+            BIN="./bin/groqbash"
+          elif [ -x "./groqbash" ]; then
+            BIN="./groqbash"
+          elif command -v groqbash >/dev/null 2>&1; then
+            BIN="$(command -v groqbash)"
+          else
+            echo "FAIL: groqbash non trovato"
+            exit 2
+          fi
+
+          echo "groqbash path: $BIN"
+          set +e
+          "$BIN" --version >./_ver 2>&1
+          RC_VER=$?
+          echo "--version exit: $RC_VER"
+          sed -n '1,50p' ./_ver || true
+          "$BIN" --help >./_help 2>&1
+          RC_HELP=$?
+          echo "--help exit: $RC_HELP"
+          sed -n '1,200p' ./_help || true
+          rm -f ./_ver ./_help
+          set -e
+
+      - name: Dump groqbash config and models (for debugging)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Listing internal groqbash.d tree:"
+          find ./bin -maxdepth 4 -type f -printf '%p %M %s\n' || true
+          echo "Internal models file content:"
+          if [ -f ./bin/groqbash.d/models/models.txt ]; then
+            sed -n '1,200p' ./bin/groqbash.d/models/models.txt || true
+          else
+            echo "(missing)"
+          fi
+          echo "XDG config models file content:"
+          if [ -f /home/runner/.config/groq/models.txt ]; then
+            sed -n '1,200p' /home/runner/.config/groq/models.txt || true
+          else
+            echo "(missing)"
+          fi
+
+      - name: Run groqbash with full trace (bash -x) and capture output
         shell: bash
         env:
           DEBUG: "1"
@@ -105,7 +154,6 @@ jobs:
             exit 2
           fi
 
-          # Ensure environment variables groqbash may rely on
           export HOME="/home/runner"
           export TMPDIR="${TMPDIR:-${RUNNER_TEMP:-/tmp}}"
           export TMP="${TMP:-$TMPDIR}"
@@ -113,16 +161,6 @@ jobs:
           export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
           export DEBUG="1"
 
-          # Defensive: ensure whitelist exists in all known locations
-          mkdir -p "$XDG_CONFIG_HOME/groq"
-          printf '%s\n' "llama-3.3-70b-versatile" > "$XDG_CONFIG_HOME/groq/models.txt"
-          chmod 600 "$XDG_CONFIG_HOME/groq/models.txt" || true
-
-          mkdir -p "./bin/groqbash.d/models"
-          printf '%s\n' "llama-3.3-70b-versatile" > "./bin/groqbash.d/models/models.txt"
-          chmod 600 "./bin/groqbash.d/models/models.txt" || true
-
-          # Sanity listing
           echo "=== Sanity: environment ==="
           echo "USER=$(id -un) UID=$(id -u) HOME=$HOME TMPDIR=$TMPDIR DEBUG=$DEBUG"
           echo "=== Sanity: files ==="
@@ -133,22 +171,21 @@ jobs:
           echo "=== groqbash head (first 20 lines) ==="
           sed -n '1,20p' "$GROQ_BIN" || true
 
-          # Run groqbash directly; capture full output
-          OUTFILE="$(mktemp)"
+          TRACE_OUT="$(mktemp)"
           set +e
-          # run without extra bash -x so internal DEBUG logging is used; still capture output
-          "$GROQ_BIN" --dry-run tests/good.json >"$OUTFILE" 2>&1
+          # Run with bash -x to trace internal commands; capture both stdout and stderr
+          bash -x "$GROQ_BIN" --dry-run tests/good.json >"$TRACE_OUT" 2>&1
           RC=$?
           set -e
 
           echo "groqbash exit code: $RC"
-          if [ -s "$OUTFILE" ]; then
-            echo "groqbash output (first 400 lines):"
-            sed -n '1,400p' "$OUTFILE"
+          if [ -s "$TRACE_OUT" ]; then
+            echo "Trace output (first 400 lines):"
+            sed -n '1,400p' "$TRACE_OUT"
           else
-            echo "groqbash output empty"
+            echo "Trace output empty"
           fi
-          rm -f "$OUTFILE"
+          rm -f "$TRACE_OUT"
 
           if [ $RC -ne 0 ]; then
             echo "FAIL: --dry-run ha restituito exit code $RC"
