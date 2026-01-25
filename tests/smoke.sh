@@ -1,117 +1,109 @@
 #!/usr/bin/env bash
+# =============================================================================
+# GroqBash — Bash-first wrapper for the Groq API
+# File: tests/smoke.sh
+# Robust smoke test for GroqBash --dry-run
+# Copyright (C) 2026 Cristian Evangelisti
+# License: GPL-3.0-or-later
+# Source: https://github.com/kamaludu/groqbash
+# =============================================================================
 set -euo pipefail
 
-# tests/smoke.sh
-# Smoke tests minimi per GroqBash: --version e --dry-run (estrazione JSON robusta)
-# Exit codes:
-#  0 = success
-#  1 = generic failure (test assertion)
-#  2 = environment/setup failure
-
-GROQSH="./bin/groqbash"
-
-echo "Eseguo smoke test su: $GROQSH"
-echo
-
-# Ensure the script exists and is executable
-if [ ! -x "$GROQSH" ]; then
-  echo "ERRORE: $GROQSH non trovato o non eseguibile"
+# Locate groqbash binary in order: ./bin/groqbash, ./groqbash, groqbash in PATH
+if [ -x "./bin/groqbash" ]; then
+  GROQSH="./bin/groqbash"
+elif [ -f "./bin/groqbash" ]; then
+  GROQSH="bash ./bin/groqbash"
+elif [ -x "./groqbash" ]; then
+  GROQSH="./groqbash"
+elif [ -f "./groqbash" ]; then
+  GROQSH="bash ./groqbash"
+elif command -v groqbash >/dev/null 2>&1; then
+  GROQSH="$(command -v groqbash)"
+else
+  echo "FAIL: groqbash non trovato. Assicurati che ./bin/groqbash o ./groqbash esistano o che groqbash sia nel PATH."
   exit 2
 fi
 
-# 1) --version
-echo "1) Verifica --version"
-if "$GROQSH" --version >/dev/null 2>&1; then
-  echo "  OK: --version eseguito"
-else
-  echo "  FAIL: --version fallito"
-  exit 1
+JSON_FILE="tests/good.json"
+if [ ! -f "$JSON_FILE" ]; then
+  echo "FAIL: $JSON_FILE non trovato. Assicurati che il file esista nel repository."
+  exit 2
 fi
 
-# 2) --dry-run
-echo
-echo "2) Verifica --dry-run (payload JSON)"
-
-# Ensure a minimal local whitelist for local runs (CI usually sets this)
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/groq"
-MODELS_FILE="$CONFIG_DIR/models.txt"
-if [ ! -s "$MODELS_FILE" ]; then
-  mkdir -p "$CONFIG_DIR"
-  echo "test-model-001" > "$MODELS_FILE"
-  chmod 600 "$MODELS_FILE"
-  echo "  Nota: whitelist temporanea creata in $MODELS_FILE"
+if ! command -v jq >/dev/null 2>&1; then
+  echo "FAIL: jq non installato. Installare jq nel runner CI."
+  exit 2
 fi
 
-PROMPT_TEXT="test payload"
+DRY_LOG="$(mktemp 2>/dev/null || mktemp -t groqbash-dry.XXXXXX)"
+trap 'rm -f "$DRY_LOG"' EXIT
 
-# Run --dry-run providing the prompt via stdin (most compatible)
+# Run groqbash --dry-run capturing stdout+stderr
 set +e
-DRY_OUT="$(printf '%s' "$PROMPT_TEXT" | "$GROQSH" --dry-run 2>&1)"
+DEBUG=1 "$GROQSH" --dry-run "$JSON_FILE" >"$DRY_LOG" 2>&1
 DRY_EXIT=$?
+DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
 set -e
 
 if [ $DRY_EXIT -ne 0 ]; then
-  echo "  FAIL: --dry-run ha restituito exit code $DRY_EXIT"
-  echo "  Output:"
-  echo "$DRY_OUT"
+  echo "FAIL: --dry-run ha restituito exit code $DRY_EXIT"
+  if [ -s "$DRY_LOG" ]; then
+    echo "Output (raw):"
+    sed -n '1,200p' "$DRY_LOG"
+  else
+    echo "Output vuoto."
+  fi
   exit 1
 fi
 
-# Trim leading/trailing whitespace
 DRY_OUT_TRIMMED="$(printf '%s' "$DRY_OUT" | sed -e 's/^[[:space:]\n\r]*//' -e 's/[[:space:]\n\r]*$//')"
 
 if [ -z "$DRY_OUT_TRIMMED" ]; then
-  echo "  FAIL: --dry-run non ha prodotto output"
+  echo "FAIL: --dry-run non ha prodotto output"
   exit 1
 fi
 
-# Extract only the JSON portion: find first line that begins (optionally after whitespace) with { or [
-LINENO="$(printf '%s\n' "$DRY_OUT_TRIMMED" | grep -n -m1 '^[[:space:]]*[{[]' | cut -d: -f1 || true)"
+# Extraction strategy:
+# 1) If a line beginning with "DRY-RUN: payload path:" exists, everything after that line is candidate JSON.
+#    If the same marker line contains JSON after the marker, use that substring.
+# 2) Otherwise fallback to first line that begins with { or [ and take from there to EOF.
+JSON_CANDIDATE=""
 
-if [ -z "$LINENO" ]; then
-  echo "  FAIL: impossibile trovare l'inizio del JSON nell'output"
-  echo "  Output completo:"
-  echo "$DRY_OUT_TRIMMED"
-  exit 1
-fi
-
-JSON_ONLY="$(printf '%s\n' "$DRY_OUT_TRIMMED" | tail -n +"$LINENO")"
-
-# Validate JSON: prefer jq, fallback to python3, fallback to heuristic
-if command -v jq >/dev/null 2>&1; then
-  if printf '%s' "$JSON_ONLY" | jq . >/dev/null 2>&1; then
-    echo "  OK: --dry-run ha stampato JSON valido (jq)"
-  else
-    echo "  FAIL: JSON non valido (jq)"
-    echo "  Estratto JSON:"
-    echo "$JSON_ONLY"
-    exit 1
-  fi
-elif command -v python3 >/dev/null 2>&1; then
-  if printf '%s' "$JSON_ONLY" | python3 -c 'import sys,json; json.load(sys.stdin)' >/dev/null 2>&1; then
-    echo "  OK: --dry-run ha stampato JSON valido (python3)"
-  else
-    echo "  FAIL: JSON non valido (python3)"
-    echo "  Estratto JSON:"
-    echo "$JSON_ONLY"
-    exit 1
-  fi
-else
-  # Basic heuristic: JSON should start with { or [
-  first_char="$(printf '%s' "$JSON_ONLY" | sed -n '1p' | sed -e 's/^[[:space:]]*//' -e 's/^\(.\).*/\1/')"
+MARK_LINE_NUM="$(grep -n -m1 '^DRY-RUN: payload path:' "$DRY_LOG" | cut -d: -f1 || true)"
+if [ -n "$MARK_LINE_NUM" ]; then
+  MARK_LINE="$(sed -n "${MARK_LINE_NUM}p" "$DRY_LOG" || true)"
+  AFTER_MARK="$(printf '%s' "$MARK_LINE" | sed -e 's/^DRY-RUN: payload path:[[:space:]]*//')"
+  first_char="$(printf '%s' "$AFTER_MARK" | sed -e 's/^[[:space:]]*//' -e 's/^\(.\).*/\1/' || true)"
   if [ "$first_char" = "{" ] || [ "$first_char" = "[" ]; then
-    echo "  WARNING: jq/python3 non installati; output sembra JSON (heuristic)"
-    echo "  Estratto (prima riga):"
-    printf '%s\n' "$JSON_ONLY" | head -n 1
-    echo "  OK (heuristic)"
+    JSON_CANDIDATE="$AFTER_MARK"
   else
-    echo "  FAIL: jq/python3 non disponibili e output non sembra JSON"
-    echo "  Estratto JSON:"
-    echo "$JSON_ONLY"
-    exit 1
+    JSON_CANDIDATE="$(sed -n "$((MARK_LINE_NUM + 1)),\$p" "$DRY_LOG" || true)"
   fi
 fi
 
-echo
-echo "Tutti i test smoke sono passati."
-exit 0
+if [ -z "$JSON_CANDIDATE" ] || [ -z "$(printf '%s' "$JSON_CANDIDATE" | sed -e '1,/[^[:space:]\n\r]/!d')" ]; then
+  FIRST_JSON_LINE="$(printf '%s\n' "$DRY_OUT_TRIMMED" | grep -n -m1 '^[[:space:]]*[{[]' | cut -d: -f1 || true)"
+  if [ -n "$FIRST_JSON_LINE" ]; then
+    JSON_CANDIDATE="$(printf '%s\n' "$DRY_OUT_TRIMMED" | tail -n +"$FIRST_JSON_LINE" || true)"
+  fi
+fi
+
+# Trim leading whitespace/newlines from candidate
+JSON_CANDIDATE="$(printf '%s' "$JSON_CANDIDATE" | sed -e '1,/[^[:space:]\n\r]/!d')"
+
+if [ -z "$JSON_CANDIDATE" ]; then
+  echo "FAIL: nessun JSON candidato trovato nell'output di --dry-run"
+  exit 1
+fi
+
+# Validate JSON with jq
+if printf '%s' "$JSON_CANDIDATE" | jq . >/dev/null 2>&1; then
+  echo "OK: --dry-run ha prodotto JSON valido (validato con jq)"
+  exit 0
+else
+  echo "FAIL: JSON estratto non valido (jq)"
+  echo "Estratto JSON (head 200):"
+  printf '%s\n' "$JSON_CANDIDATE" | sed -n '1,200p'
+  exit 1
+fi

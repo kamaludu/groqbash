@@ -1,0 +1,12 @@
+{
+  "model": "test-model-001",
+  "stream": false,
+  "temperature": 0.0,
+  "max_tokens": 16,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Test automatico: rispondi con una frase breve."
+    }
+  ]
+}

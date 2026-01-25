@@ -1,0 +1,87 @@
+# =============================================================================
+# GroqBash — Bash-first wrapper for the Groq API
+# File: extras/docs/help.txt
+# Copyright (C) 2026 Cristian Evangelisti
+# License: GPL-3.0-or-later
+# Source: https://github.com/kamaludu/groqbash
+# =============================================================================
+
+GroqBash is a secure, modular, Bash-focused CLI wrapper for the Groq
+OpenAI-compatible Chat Completions API. It supports streaming, model
+selection, provider modules, safe temporary directories, and optional extras.
+
+Quick setup
+-----------
+  chmod +x groqbash
+  export GROQ_API_KEY="gsk_xxxxxxxxxxxxxxxxx"
+
+Basic usage
+-----------
+  groqbash "write a bash function"
+  echo "hello" | groqbash
+  groqbash -f input.txt
+  groqbash --provider gemini "translate this"
+
+Main options
+------------
+  -m, --model <name>         Select model (e.g. llama3-70b-8192)
+  -f <file>                  Use file as input
+  --system <text>            Set system prompt
+  --temp <value>             Temperature (default: 1.0)
+  --max <n>                  Max tokens (default: 4096)
+
+  --refresh-models           Update model list using Groq Models API
+  --list-models              Show available models
+  --set-default <model>      Set default model
+  --auto-default-policy <p>  preferred | alpha (default: preferred)
+
+  --provider <name>          Use external provider module (extras/providers)
+  --provider                 Interactive provider selection
+  --install-extras           Install extras (docs, utils, providers)
+
+  --save                     Force save to file
+  --nosave                   Force print to terminal
+  --out <path>               Output file or directory
+  --threshold <n>            Auto-save threshold (default: 1000 chars)
+
+  --dry-run                  Print payload and exit
+  --quiet                    Minimal output
+  --debug                    Verbose debug + keep temp files
+  --version                  Print version
+  -h, --help                 Show this help
+
+Security notes
+--------------
+  • GroqBash never uses /tmp.
+  • All temporary files are created under a secure directory.
+  • Temporary directories require mktemp -d; insecure fallbacks are refused.
+  • Provider modules are loaded only from non-world-writable locations.
+  • GROQBASHEXTRASDIR must be an absolute, non-world-writable path.
+  • GROQBASHTMPDIR must be a non-world-writable path.
+  • Never commit your API key.
+  • Never execute model output as shell commands.
+
+Requirements
+------------
+  Required:
+    - bash
+    - curl
+    - mktemp (secure directory creation)
+
+  Recommended:
+    - jq (JSON parsing)
+    - python3 (fsync)
+    - coreutils (chmod, mv, etc.)
+    - grep, sed, awk
+
+Compatibility
+-------------
+  • Works on Linux, macOS, Termux, WSL.
+  • Requires Bash (not POSIX sh).
+  • Colors disabled in non-interactive environments.
+
+Examples
+--------
+  TMPDIR="$HOME/.cache/groq_tmp" groqbash "say hi"
+  echo "text" | groqbash -m llama3-70b-8192
+  groqbash --provider gemini "summarize this"
