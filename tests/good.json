@@ -1,12 +1,12 @@
 {
-  "model": "test-model-001"
+  "model": "test-model-001",
   "stream": false,
-  "temperature": 0.7,
-  "max_tokens": 512,
+  "temperature": 0.0,
+  "max_tokens": 16,
   "messages": [
     {
       "role": "user",
-      "content": "Ciao! Questo è un test automatico. Rispondi brevemente con un saluto e chiedi come posso aiutare."
+      "content": "Test automatico: rispondi con una frase breve."
     }
   ]
 }
