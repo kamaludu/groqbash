@@ -83,11 +83,13 @@ jobs:
             '{model:$model,stream:false,temperature:0.0,max_tokens:16,messages:[{role:"user",content:$content}]}' \
             > tests/good.json
           chmod 600 tests/good.json || true
-          echo "tests/good.json content:"
+          echo "tests/good.json:"
           jq . tests/good.json
 
-      - name: Run smoke tests with full internal trace (bash -x)
+      - name: Run smoke tests (with DEBUG=1)
         shell: bash
+        env:
+          DEBUG: "1"
         run: |
           set -euo pipefail
 
@@ -109,6 +111,7 @@ jobs:
           export TMP="${TMP:-$TMPDIR}"
           export TEMP="${TEMP:-$TMPDIR}"
           export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+          export DEBUG="1"
 
           # Defensive: ensure whitelist exists in all known locations
           mkdir -p "$XDG_CONFIG_HOME/groq"
@@ -119,9 +122,9 @@ jobs:
           printf '%s\n' "llama-3.3-70b-versatile" > "./bin/groqbash.d/models/models.txt"
           chmod 600 "./bin/groqbash.d/models/models.txt" || true
 
-          # Quick sanity listing
+          # Sanity listing
           echo "=== Sanity: environment ==="
-          echo "USER=$(id -un) UID=$(id -u) HOME=$HOME TMPDIR=$TMPDIR"
+          echo "USER=$(id -un) UID=$(id -u) HOME=$HOME TMPDIR=$TMPDIR DEBUG=$DEBUG"
           echo "=== Sanity: files ==="
           ls -la "$GROQ_BIN" || true
           ls -la "$XDG_CONFIG_HOME/groq/models.txt" || true
@@ -130,22 +133,22 @@ jobs:
           echo "=== groqbash head (first 20 lines) ==="
           sed -n '1,20p' "$GROQ_BIN" || true
 
-          # Run groqbash with tracing to reveal the failing command
-          TRACE_OUT="$(mktemp)"
+          # Run groqbash directly; capture full output
+          OUTFILE="$(mktemp)"
           set +e
-          # Use bash -x to trace commands inside the script; capture both stdout and stderr
-          bash -x "$GROQ_BIN" --dry-run tests/good.json >"$TRACE_OUT" 2>&1
+          # run without extra bash -x so internal DEBUG logging is used; still capture output
+          "$GROQ_BIN" --dry-run tests/good.json >"$OUTFILE" 2>&1
           RC=$?
           set -e
 
           echo "groqbash exit code: $RC"
-          if [ -s "$TRACE_OUT" ]; then
-            echo "Trace output (first 400 lines):"
-            sed -n '1,400p' "$TRACE_OUT"
+          if [ -s "$OUTFILE" ]; then
+            echo "groqbash output (first 400 lines):"
+            sed -n '1,400p' "$OUTFILE"
           else
-            echo "Trace output empty"
+            echo "groqbash output empty"
           fi
-          rm -f "$TRACE_OUT"
+          rm -f "$OUTFILE"
 
           if [ $RC -ne 0 ]; then
             echo "FAIL: --dry-run ha restituito exit code $RC"
