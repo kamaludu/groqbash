@@ -31,18 +31,21 @@ if [ ! -f "$JSON_FILE" ]; then
   exit 2
 fi
 
-# Prepare DRY_LOG
+if ! command -v jq >/dev/null 2>&1; then
+  echo "FAIL: jq non installato. Installare jq nel runner CI."
+  exit 2
+fi
+
 DRY_LOG="$(mktemp 2>/dev/null || mktemp -t groqbash-dry.XXXXXX)"
 trap 'rm -f "$DRY_LOG"' EXIT
 
-# Run groqbash --dry-run capturing stdout+stderr (use JSON file as argument)
+# Run groqbash --dry-run capturing stdout+stderr
 set +e
 DEBUG=1 "$GROQSH" --dry-run "$JSON_FILE" >"$DRY_LOG" 2>&1
 DRY_EXIT=$?
 DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
 set -e
 
-# If groqbash returned non-zero, fail with diagnostics (show raw output)
 if [ $DRY_EXIT -ne 0 ]; then
   echo "FAIL: --dry-run ha restituito exit code $DRY_EXIT"
   if [ -s "$DRY_LOG" ]; then
@@ -54,7 +57,6 @@ if [ $DRY_EXIT -ne 0 ]; then
   exit 1
 fi
 
-# Trim leading/trailing whitespace
 DRY_OUT_TRIMMED="$(printf '%s' "$DRY_OUT" | sed -e 's/^[[:space:]\n\r]*//' -e 's/[[:space:]\n\r]*$//')"
 
 if [ -z "$DRY_OUT_TRIMMED" ]; then
@@ -66,24 +68,20 @@ fi
 # 1) If a line beginning with "DRY-RUN: payload path:" exists, everything after that line is candidate JSON.
 #    If the same marker line contains JSON after the marker, use that substring.
 # 2) Otherwise fallback to first line that begins with { or [ and take from there to EOF.
-
 JSON_CANDIDATE=""
 
 MARK_LINE_NUM="$(grep -n -m1 '^DRY-RUN: payload path:' "$DRY_LOG" | cut -d: -f1 || true)"
 if [ -n "$MARK_LINE_NUM" ]; then
   MARK_LINE="$(sed -n "${MARK_LINE_NUM}p" "$DRY_LOG" || true)"
   AFTER_MARK="$(printf '%s' "$MARK_LINE" | sed -e 's/^DRY-RUN: payload path:[[:space:]]*//')"
-  # If remainder of marker line starts with { or [, use it
   first_char="$(printf '%s' "$AFTER_MARK" | sed -e 's/^[[:space:]]*//' -e 's/^\(.\).*/\1/' || true)"
   if [ "$first_char" = "{" ] || [ "$first_char" = "[" ]; then
     JSON_CANDIDATE="$AFTER_MARK"
   else
-    # take everything after the marker line to EOF as candidate
     JSON_CANDIDATE="$(sed -n "$((MARK_LINE_NUM + 1)),\$p" "$DRY_LOG" || true)"
   fi
 fi
 
-# Fallback: first line that begins with { or [
 if [ -z "$JSON_CANDIDATE" ] || [ -z "$(printf '%s' "$JSON_CANDIDATE" | sed -e '1,/[^[:space:]\n\r]/!d')" ]; then
   FIRST_JSON_LINE="$(printf '%s\n' "$DRY_OUT_TRIMMED" | grep -n -m1 '^[[:space:]]*[{[]' | cut -d: -f1 || true)"
   if [ -n "$FIRST_JSON_LINE" ]; then
@@ -100,14 +98,8 @@ if [ -z "$JSON_CANDIDATE" ]; then
 fi
 
 # Validate JSON with jq
-if ! command -v jq >/dev/null 2>&1; then
-  echo "FAIL: jq non installato. Installare jq nel runner CI."
-  exit 2
-fi
-
 if printf '%s' "$JSON_CANDIDATE" | jq . >/dev/null 2>&1; then
   echo "OK: --dry-run ha prodotto JSON valido (validato con jq)"
-  echo "Tutti i test smoke sono passati."
   exit 0
 else
   echo "FAIL: JSON estratto non valido (jq)"
