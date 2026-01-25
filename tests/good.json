@@ -1,5 +1,5 @@
 {
-  "model": "llama-3.3-70b-versatile",
+  "model": "test-model-001"
   "stream": false,
   "temperature": 0.7,
   "max_tokens": 512,
