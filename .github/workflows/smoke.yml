@@ -15,11 +15,11 @@ permissions:
 
 jobs:
   smoke:
-    # Run on pushes and on PRs that originate from the same repository (secrets are not available for fork PRs)
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      TMPDIR: ${{ runner.temp }}
 
     steps:
       - name: Checkout repository
@@ -58,29 +58,22 @@ jobs:
           set -euo pipefail
           chmod +x bin/groqbash || true
 
-      - name: Prepare TMPDIR for groqbash
+      - name: Ensure TMPDIR exists and is writable
         shell: bash
         run: |
           set -euo pipefail
-          # Prefer runner temp to ensure writability
-          export TMPDIR="${TMPDIR:-${RUNNER_TEMP:-/tmp}}"
-          mkdir -p "$TMPDIR"
-          chmod 700 "$TMPDIR"
-          echo "TMPDIR set to: $TMPDIR"
+          mkdir -p "${TMPDIR}"
+          chmod 700 "${TMPDIR}"
 
-      - name: Ensure jq and prepare tests/good.json
+      - name: Ensure tests/good.json exists
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get -yq update
-            sudo apt-get -yq install --no-install-recommends jq
-          fi
           mkdir -p tests
           jq -n \
             --arg model "llama-3.3-70b-versatile" \
-            --arg content "Ciao! Questo è un test automatico. Rispondi brevemente con un saluto e chiedi come posso aiutare." \
-            '{model:$model,stream:false,temperature:0.7,max_tokens:512,messages:[{role:"user",content:$content}]}' \
+            --arg content "Test automatico: rispondi con una frase breve." \
+            '{model:$model,stream:false,temperature:0.0,max_tokens:16,messages:[{role:"user",content:$content}]}' \
             > tests/good.json
           chmod 600 tests/good.json || true
 
