@@ -80,12 +80,12 @@ jobs:
             > tests/good.json
           chmod 600 tests/good.json || true
 
-      - name: Run smoke tests (direct execution, explicit env)
+      - name: Run smoke tests with diagnostic trace
         shell: bash
         run: |
           set -euo pipefail
 
-          # Prefer direct execution of the script
+          # Locate groqbash binary
           if [ -x "./bin/groqbash" ]; then
             GROQ_BIN="./bin/groqbash"
           elif [ -x "./groqbash" ]; then
@@ -109,25 +109,36 @@ jobs:
           printf '%s\n' "llama-3.3-70b-versatile" > "$XDG_CONFIG_HOME/groq/models.txt"
           chmod 600 "$XDG_CONFIG_HOME/groq/models.txt" || true
 
-          OUTFILE="$(mktemp)"
+          # Sanity checks
+          echo "=== Environment ==="
+          echo "USER=$(id -un) UID=$(id -u) HOME=$HOME TMPDIR=$TMPDIR"
+          echo "=== Files ==="
+          ls -la ./bin/groqbash || true
+          ls -la "$XDG_CONFIG_HOME/groq/models.txt" || true
+          ls -la tests/good.json || true
+          echo "=== groqbash head ==="
+          sed -n '1,20p' "$GROQ_BIN" || true
+
+          # Run groqbash with tracing to capture failing command and output
+          TRACE_OUT="$(mktemp)"
           set +e
-          "$GROQ_BIN" --dry-run tests/good.json >"$OUTFILE" 2>&1
+          # Use bash -x to trace commands inside the script
+          bash -x "$GROQ_BIN" --dry-run tests/good.json >"$TRACE_OUT" 2>&1
           RC=$?
           set -e
 
+          echo "groqbash exit code: $RC"
+          if [ -s "$TRACE_OUT" ]; then
+            echo "Trace output (first 400 lines):"
+            sed -n '1,400p' "$TRACE_OUT"
+          else
+            echo "Trace output empty"
+          fi
+          rm -f "$TRACE_OUT"
+
           if [ $RC -ne 0 ]; then
             echo "FAIL: --dry-run ha restituito exit code $RC"
-            if [ -s "$OUTFILE" ]; then
-              echo "Output (first 200 lines):"
-              sed -n '1,200p' "$OUTFILE"
-            else
-              echo "Output vuoto."
-            fi
-            rm -f "$OUTFILE"
             exit 1
           fi
 
           echo "OK: --dry-run completato con exit code 0"
-          echo "Output (first 200 lines):"
-          sed -n '1,200p' "$OUTFILE"
-          rm -f "$OUTFILE"
