@@ -49,16 +49,24 @@ jobs:
           set -euo pipefail
           CONFIG_DIR="$HOME/.config/groq"
           mkdir -p "$CONFIG_DIR"
-          printf '%s\n' \
-            "test-model-001" \
-            > "$CONFIG_DIR/models.txt"
-          chmod 600 "$CONFIG_DIR/models.txt"
+          printf '%s\n' "llama-3.3-70b-versatile" > "$CONFIG_DIR/models.txt"
+          chmod 600 "$CONFIG_DIR/models.txt" || true
 
       - name: Make groqbash executable
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x bin/groqbash
+          chmod +x bin/groqbash || true
+
+      - name: Prepare TMPDIR for groqbash
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Prefer runner temp to ensure writability
+          export TMPDIR="${TMPDIR:-${RUNNER_TEMP:-/tmp}}"
+          mkdir -p "$TMPDIR"
+          chmod 700 "$TMPDIR"
+          echo "TMPDIR set to: $TMPDIR"
 
       - name: Ensure jq and prepare tests/good.json
         shell: bash
