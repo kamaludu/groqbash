@@ -2,24 +2,21 @@
 # =============================================================================
 # GroqBash — Bash-first wrapper for the Groq API
 # File: tests/smoke.sh
+# Robust smoke test for GroqBash --dry-run
 # Copyright (C) 2026 Cristian Evangelisti
 # License: GPL-3.0-or-later
 # Source: https://github.com/kamaludu/groqbash
 # =============================================================================
 set -euo pipefail
 
-# tests/smoke.sh
-# Robust smoke test per GroqBash --dry-run
-# - Individua il binario in modo robusto
-# - Cattura l'output completo di --dry-run
-# - Estrae JSON candidato dopo il marker "DRY-RUN: payload path:" oppure con fallback alla prima riga che inizia con { o [
-# - Pulisce spazi iniziali e valida con jq (o python3 come fallback)
-# - Fallisce solo se non trova JSON o la validazione fallisce
-#
-# Exit codes:
-#  0 = success
-#  1 = test assertion failure
-#  2 = environment/setup failure
+# --- Description
+# Questo script esegue uno smoke test deterministico per groqbash:
+# - verifica --version (non fatale)
+# - esegue --dry-run usando il file tests/good.json (argomento, non stdin)
+# - cattura stdout+stderr in un DRY_LOG
+# - se l'output è vuoto o exit non-zero, cerca log interni in posizioni candidate
+# - estrae il JSON candidato dall'output e lo valida con jq (o python3 come fallback)
+# - restituisce 0 solo se il JSON è valido e non ci sono errori
 
 # --- Locate groqbash binary robustly
 if [ -x "./bin/groqbash" ]; then
@@ -32,6 +29,12 @@ elif [ -f "./groqbash" ]; then
   GROQSH="bash ./groqbash"
 else
   GROQSH="groqbash"  # fallback to PATH
+fi
+
+# --- Verify binary availability
+if ! command -v ${GROQSH%% *} >/dev/null 2>&1; then
+  echo "FAIL: groqbash non trovato. Controlla che ./bin/groqbash esista o che groqbash sia nel PATH."
+  exit 2
 fi
 
 echo "Eseguo smoke test su: $GROQSH"
@@ -64,7 +67,7 @@ mktemp_safe() {
 # --- --version sanity check (non-fatal)
 echo "1) Verifica --version"
 set +e
-sh -c "$GROQSH --version" >/dev/null 2>&1
+DEBUG=1 "$GROQSH" --version >/dev/null 2>&1
 VER_EXIT=$?
 set -e
 if [ $VER_EXIT -ne 0 ]; then
@@ -72,6 +75,7 @@ if [ $VER_EXIT -ne 0 ]; then
 else
   echo "  OK: --version eseguito"
 fi
+echo
 
 # --- Prepare minimal whitelist if missing (safe, non-invasive)
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/groq"
@@ -83,23 +87,24 @@ if [ ! -s "$MODELS_FILE" ]; then
   echo "  Nota: whitelist temporanea creata in $MODELS_FILE"
 fi
 
-# --- Prepare input and capture files
-PROMPT_TEXT="test payload"
-INPUT_FILE="$(mktemp_safe groqbash-in.XXXXXX)" || { echo "FAIL: cannot create input file"; exit 2; }
-printf '%s' "$PROMPT_TEXT" >"$INPUT_FILE"
+# --- Ensure tests/good.json exists
+JSON_FILE="tests/good.json"
+if [ ! -f "$JSON_FILE" ]; then
+  echo "FAIL: $JSON_FILE non trovato. Assicurati che tests/good.json esista nel repository."
+  exit 2
+fi
 
-DRY_LOG="$(mktemp_safe groqbash-dry.XXXXXX)" || { rm -f "$INPUT_FILE"; echo "FAIL: cannot create dry log"; exit 2; }
+# --- Prepare DRY_LOG
+DRY_LOG="$(mktemp_safe groqbash-dry.XXXXXX)" || { echo "FAIL: cannot create dry log"; exit 2; }
 
 cleanup() {
   [ -n "${DRY_LOG:-}" ] && [ -f "$DRY_LOG" ] && rm -f "$DRY_LOG"
-  [ -n "${INPUT_FILE:-}" ] && [ -f "$INPUT_FILE" ] && rm -f "$INPUT_FILE"
 }
 trap cleanup EXIT
 
-# --- Run groqbash --dry-run capturing stdout+stderr
+# --- Run groqbash --dry-run capturing stdout+stderr (use JSON file as argument)
 set +e
-# DEBUG=1 is safe for diagnostics; does not change groqbash logic here
-sh -c "DEBUG=1 $GROQSH --dry-run <\"$INPUT_FILE\"" >"$DRY_LOG" 2>&1
+DEBUG=1 "$GROQSH" --dry-run "$JSON_FILE" >"$DRY_LOG" 2>&1
 DRY_EXIT=$?
 DRY_OUT="$(cat "$DRY_LOG" 2>/dev/null || true)"
 set -e
