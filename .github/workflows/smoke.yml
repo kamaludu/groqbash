@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      TMPDIR: ${{ runner.temp }}
 
     steps:
       - name: Checkout repository
@@ -58,12 +57,16 @@ jobs:
           set -euo pipefail
           chmod +x bin/groqbash || true
 
-      - name: Ensure TMPDIR exists and is writable
+      - name: Set TMPDIR to runner temp and persist for job
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${TMPDIR}"
-          chmod 700 "${TMPDIR}"
+          # Use RUNNER_TEMP provided by the runner; persist to GITHUB_ENV so it's available in later steps
+          TMPDIR="${RUNNER_TEMP:-/tmp}"
+          mkdir -p "$TMPDIR"
+          chmod 700 "$TMPDIR"
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
+          echo "TMPDIR set to: $TMPDIR"
 
       - name: Ensure tests/good.json exists
         shell: bash
