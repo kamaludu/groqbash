@@ -10,8 +10,13 @@ concurrency:
   group: smoke-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   smoke:
+    # Run on pushes and on PRs that originate from the same repository (secrets are not available for fork PRs)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -27,6 +32,16 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get -yq update
           sudo apt-get -yq install --no-install-recommends bash curl jq python3
+
+      - name: Ensure GROQ_API_KEY is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GROQ_API_KEY:-}" ]; then
+            echo "ERROR: GROQ_API_KEY secret is not set or is empty. Smoke tests require this secret when running in CI."
+            echo "If this is a forked PR, secrets are not available; consider running smoke tests from a branch in the main repository."
+            exit 2
+          fi
 
       - name: Prepare fake models whitelist for CI
         shell: bash
