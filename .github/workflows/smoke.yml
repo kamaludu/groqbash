@@ -113,14 +113,13 @@ jobs:
           RC=$?
           set -e
 
+          echo "Exit code: $RC"
+          echo "Output:"
+          sed -n '1,200p' "$OUTFILE"
+
           if [ $RC -ne 0 ]; then
-            echo "FAIL: --dry-run ha restituito exit code $RC"
-            echo "Output:"
-            sed -n '1,200p' "$OUTFILE" || true
-            rm -f "$OUTFILE"
+            echo "FAIL: dry-run exit $RC"
             exit 1
           fi
 
           echo "OK: --dry-run completato con exit code 0"
-          sed -n '1,200p' "$OUTFILE"
-          rm -f "$OUTFILE"
