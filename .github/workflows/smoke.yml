@@ -1,4 +1,4 @@
-name: Smoke tests minimal
+name: Smoke tests
 
 on:
   push:
@@ -6,11 +6,66 @@ on:
   pull_request:
     branches: [ "main" ]
 
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Echo
-        run: echo "smoke minimal OK"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get -yq update
+          sudo apt-get -yq install --no-install-recommends bash curl jq python3
+        shell: bash
+
+      - name: Prepare fake models whitelist for CI
+        run: |
+          set -euo pipefail
+          CONFIG_DIR="$HOME/.config/groq"
+          mkdir -p "$CONFIG_DIR"
+          echo "test-model-001" > "$CONFIG_DIR/models.txt"
+          chmod 600 "$CONFIG_DIR/models.txt"
+        shell: bash
+
+      - name: Make groqbash executable
+        run: |
+          set -euo pipefail
+          chmod +x bin/groqbash
+        shell: bash
+
+      - name: Prepare CI prerequisites for smoke tests
+        run: |
+          set -euo pipefail
+          mkdir -p tests
+          cat > tests/good.json <<'JSON'
+{
+  "model": "llama-3.3-70b-versatile",
+  "stream": false,
+  "temperature": 0.7,
+  "max_tokens": 512,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Verifica automatica: rispondi con una frase breve in italiano che confermi il funzionamento."
+    }
+  ]
+}
+JSON
+          chmod 600 tests/good.json
+        shell: bash
+
+      - name: Run smoke tests
+        run: |
+          set -euo pipefail
+          bash tests/smoke.sh
+        shell: bash
