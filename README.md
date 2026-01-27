@@ -228,7 +228,7 @@ extras/security/validate-env.sh
 - **Parsing JSON/SSE**: robusto ma non un parser completo.  
 - **TOCTOU**: mitigato ma non eliminabile in Bash.
 
-Per dettagli completi: **SECURITY.md**.
+Per dettagli completi: **[SECURITY](SECURITY.md)**.
 
 ---
 
@@ -247,7 +247,7 @@ Per dettagli completi: **SECURITY.md**.
 ## Licenza
 
 GroqBash è distribuito sotto licenza **GNU GPL v3**.  
-Vedi **LICENSE** per il testo completo.
+Vedi **[LICENSE](LICENSE.md)** per il testo completo.
 
 ---
 
