@@ -66,13 +66,12 @@ Requirements
   Required:
     - bash
     - curl
-    - mktemp (secure directory creation)
+    - coreutils (mktemp, chmod, mv, mkdir, head, sed, awk, grep)
     - jq (JSON parsing)
 
   Recommended:
     - python3 (fsync)
-    - coreutils (chmod, mv, etc.)
-    - grep, sed, awk
+    - sha256sum / shasum — (security extras)
 
 Compatibility
 -------------
